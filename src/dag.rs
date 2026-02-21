@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use crate::work_item::{TaskState, WorkItem};
+use std::collections::HashMap;
 
 pub struct DagEngine {
     tasks: HashMap<u64, WorkItem>,
@@ -56,14 +56,15 @@ impl DagEngine {
 
     pub fn has_cycle(&self) -> bool {
         // DFS cycle detection using three-color marking (White/Gray/Black)
-        enum Color { White, Gray, Black }
-        let mut colors: HashMap<u64, Color> = self.tasks.keys().map(|&id| (id, Color::White)).collect();
+        enum Color {
+            White,
+            Gray,
+            Black,
+        }
+        let mut colors: HashMap<u64, Color> =
+            self.tasks.keys().map(|&id| (id, Color::White)).collect();
 
-        fn dfs(
-            id: u64,
-            tasks: &HashMap<u64, WorkItem>,
-            colors: &mut HashMap<u64, Color>,
-        ) -> bool {
+        fn dfs(id: u64, tasks: &HashMap<u64, WorkItem>, colors: &mut HashMap<u64, Color>) -> bool {
             colors.insert(id, Color::Gray);
             if let Some(task) = tasks.get(&id) {
                 for &dep in &task.dependencies {
@@ -87,10 +88,8 @@ impl DagEngine {
 
         let ids: Vec<u64> = self.tasks.keys().copied().collect();
         for id in ids {
-            if matches!(colors.get(&id), Some(Color::White)) {
-                if dfs(id, &self.tasks, &mut colors) {
-                    return true;
-                }
+            if matches!(colors.get(&id), Some(Color::White)) && dfs(id, &self.tasks, &mut colors) {
+                return true;
             }
         }
         false
@@ -117,7 +116,19 @@ mod tests {
     use crate::work_item::Priority;
 
     fn make_task(id: u64, deps: Vec<u64>) -> WorkItem {
-        WorkItem::new(id, format!("goal{}", id), "repo", "main", Priority::Batch, deps, 1, 512, false, None, 0)
+        WorkItem::new(
+            id,
+            format!("goal{}", id),
+            "repo",
+            "main",
+            Priority::Batch,
+            deps,
+            1,
+            512,
+            false,
+            None,
+            0,
+        )
     }
 
     #[test]
