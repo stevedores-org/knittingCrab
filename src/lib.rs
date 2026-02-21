@@ -5,6 +5,7 @@ pub mod policy;
 pub mod resource_model;
 pub mod scheduler;
 pub mod work_item;
+pub mod worker;
 
 pub use dag::DagEngine;
 pub use error::SchedulerError;
@@ -13,3 +14,4 @@ pub use policy::{BackoffStrategy, Budget};
 pub use resource_model::ResourceModel;
 pub use scheduler::Scheduler;
 pub use work_item::{Priority, TaskState, WorkItem};
+pub use worker::{FakeWorker, TaskResult, Worker};
