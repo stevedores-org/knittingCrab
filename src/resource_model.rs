@@ -1,13 +1,17 @@
+use crate::error::SchedulerError;
+
 #[derive(Debug, Clone)]
 pub struct ResourceModel {
-    pub total_cpu_cores: u32,
-    pub available_cpu_cores: u32,
-    pub total_ram_mb: u64,
-    pub available_ram_mb: u64,
-    pub total_gpu_slots: u32,
-    pub available_gpu_slots: u32,
-    pub total_network_slots: u32,
-    pub available_network_slots: u32,
+    total_cpu_cores: u32,
+    available_cpu_cores: u32,
+    total_ram_mb: u64,
+    available_ram_mb: u64,
+    total_gpu_slots: u32,
+    available_gpu_slots: u32,
+    #[allow(dead_code)]
+    total_network_slots: u32,
+    #[allow(dead_code)]
+    available_network_slots: u32,
 }
 
 impl ResourceModel {
@@ -30,13 +34,16 @@ impl ResourceModel {
             && (!gpu || self.available_gpu_slots >= 1)
     }
 
-    pub fn allocate(&mut self, cpu: u32, ram: u64, gpu: bool) -> Result<(), String> {
+    pub fn allocate(&mut self, cpu: u32, ram: u64, gpu: bool) -> Result<(), SchedulerError> {
         if !self.can_allocate(cpu, ram, gpu) {
-            return Err(format!(
-                "Insufficient resources: need {} CPU, {} MB RAM, gpu={}; available {} CPU, {} MB RAM, {} GPU slots",
-                cpu, ram, gpu,
-                self.available_cpu_cores, self.available_ram_mb, self.available_gpu_slots
-            ));
+            return Err(SchedulerError::InsufficientResources {
+                need_cpu: cpu,
+                need_ram: ram,
+                need_gpu: gpu,
+                avail_cpu: self.available_cpu_cores,
+                avail_ram: self.available_ram_mb,
+                avail_gpu: self.available_gpu_slots,
+            });
         }
         self.available_cpu_cores -= cpu;
         self.available_ram_mb -= ram;
@@ -60,6 +67,22 @@ impl ResourceModel {
         }
         let used = self.total_cpu_cores - self.available_cpu_cores;
         used as f64 / self.total_cpu_cores as f64
+    }
+
+    pub fn available_cpu(&self) -> u32 {
+        self.available_cpu_cores
+    }
+
+    pub fn total_cpu(&self) -> u32 {
+        self.total_cpu_cores
+    }
+
+    pub fn available_ram(&self) -> u64 {
+        self.available_ram_mb
+    }
+
+    pub fn available_gpu(&self) -> u32 {
+        self.available_gpu_slots
     }
 }
 
@@ -93,8 +116,18 @@ mod tests {
         let mut r = ResourceModel::new(4, 4096, 1, 4);
         r.allocate(2, 1024, true).unwrap();
         r.release(2, 1024, true);
-        assert_eq!(r.available_cpu_cores, 4);
-        assert_eq!(r.available_ram_mb, 4096);
-        assert_eq!(r.available_gpu_slots, 1);
+        assert_eq!(r.available_cpu(), 4);
+        assert_eq!(r.available_ram(), 4096);
+        assert_eq!(r.available_gpu(), 1);
+    }
+
+    #[test]
+    fn insufficient_resources_error_type() {
+        let mut r = ResourceModel::new(2, 1024, 0, 4);
+        let err = r.allocate(4, 512, false).unwrap_err();
+        assert!(matches!(
+            err,
+            SchedulerError::InsufficientResources { need_cpu: 4, .. }
+        ));
     }
 }

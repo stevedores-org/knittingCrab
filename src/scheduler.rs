@@ -3,19 +3,20 @@ use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 use crate::dag::DagEngine;
+use crate::error::SchedulerError;
 use crate::lease::{Lease, LeaseManager};
 use crate::resource_model::ResourceModel;
 use crate::work_item::{TaskState, WorkItem};
 
-pub struct SchedulerInner {
-    pub queue: BinaryHeap<WorkItem>,
-    pub dag: DagEngine,
-    pub resources: ResourceModel,
-    pub leases: LeaseManager,
-    pub goal_locks: HashMap<String, u64>,
-    pub cache: HashMap<String, TaskState>,
+struct SchedulerInner {
+    queue: BinaryHeap<WorkItem>,
+    dag: DagEngine,
+    resources: ResourceModel,
+    leases: LeaseManager,
+    goal_locks: HashMap<String, u64>,
+    cache: HashMap<String, TaskState>,
     /// Exit codes that are eligible for retry. If empty, all failures are retryable.
-    pub retryable_exit_codes: Vec<i32>,
+    retryable_exit_codes: Vec<i32>,
 }
 
 pub struct Scheduler {
@@ -45,7 +46,7 @@ impl Scheduler {
         self
     }
 
-    pub fn enqueue(&self, item: WorkItem) -> Result<(), String> {
+    pub fn enqueue(&self, item: WorkItem) -> Result<(), SchedulerError> {
         let mut inner = self.inner.write().unwrap();
         inner.dag.add_task(item.clone())?;
         inner.queue.push(item);
@@ -96,7 +97,7 @@ impl Scheduler {
         task: WorkItem,
         worker_id: u64,
         lease_duration: Duration,
-    ) -> Result<Lease, String> {
+    ) -> Result<Lease, SchedulerError> {
         let mut inner = self.inner.write().unwrap();
         inner.resources.allocate(
             task.required_cpu_cores,
@@ -200,14 +201,17 @@ impl Scheduler {
         inner.cache.insert(cache_key, state);
     }
 
+    pub fn resource_utilization(&self) -> f64 {
+        let inner = self.inner.read().unwrap();
+        inner.resources.utilization()
+    }
+
     fn is_retryable(retryable_codes: &[i32], exit_code: Option<i32>) -> bool {
         if retryable_codes.is_empty() {
-            // No codes configured: all failures are retryable
             return true;
         }
         match exit_code {
             Some(code) => retryable_codes.contains(&code),
-            // No exit code provided: treat as non-retryable when codes are configured
             None => false,
         }
     }
@@ -280,13 +284,7 @@ mod tests {
             .schedule_task(next, 1, Duration::from_secs(60))
             .unwrap();
         sched.complete_task(lease.id, true, None, None);
-        {
-            let inner = sched.inner.read().unwrap();
-            assert_eq!(
-                inner.resources.available_cpu_cores,
-                inner.resources.total_cpu_cores
-            );
-        }
+        assert!((sched.resource_utilization() - 0.0).abs() < f64::EPSILON);
     }
 
     #[test]
@@ -314,15 +312,16 @@ mod tests {
         let _lease = sched
             .schedule_task(next.clone(), 1, Duration::from_secs(60))
             .unwrap();
-        // Second lease for the same task should fail
         let result = sched.schedule_task(next, 2, Duration::from_secs(60));
-        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            SchedulerError::LeaseConflict { .. }
+        ));
     }
 
     #[test]
     fn permanent_fail_after_max_attempts() {
         let sched = make_scheduler();
-        // max_retries = 2, so task gets 2 retries (3 total attempts)
         let mut task = make_task(1, Priority::Batch, vec![]);
         task.max_retries = 2;
         sched.enqueue(task).unwrap();
@@ -335,7 +334,6 @@ mod tests {
                 .unwrap();
             sched.complete_task(lease.id, false, Some(1), Some("oops".into()));
         }
-        // After exhausting retries, task should not be re-queued
         assert!(
             sched.next_task().is_none(),
             "Task should be permanently failed after max retries"
@@ -351,7 +349,6 @@ mod tests {
         task.max_retries = 3;
         sched.enqueue(task).unwrap();
 
-        // Fail with non-retryable exit code 1 — should NOT retry
         let next = sched.next_task().unwrap();
         let lease = sched
             .schedule_task(next, 1, Duration::from_secs(60))
@@ -363,7 +360,6 @@ mod tests {
             "Non-retryable exit code should cause permanent failure"
         );
 
-        // Now test with a retryable exit code
         let sched2 =
             Scheduler::new(ResourceModel::new(8, 8192, 1, 4)).with_retryable_exit_codes(vec![75]);
         let mut task2 = make_task(2, Priority::Batch, vec![]);
@@ -388,17 +384,59 @@ mod tests {
         let task = make_task(1, Priority::Batch, vec![]);
         let key = task.cache_key.clone();
 
-        // Store a cached failure
         sched.store_cache(key.clone(), TaskState::Failed("previous run".into()));
-
-        // Verify the cache returns the failure
         let cached = sched.check_cache(&key);
         assert!(matches!(cached, Some(TaskState::Failed(_))));
 
-        // Policy: caller can choose to skip or re-execute based on cached state.
-        // Overwrite cache to simulate a policy that clears failed cache entries.
         sched.store_cache(key.clone(), TaskState::Pending);
         let cleared = sched.check_cache(&key);
         assert_eq!(cleared, Some(TaskState::Pending));
+    }
+
+    #[test]
+    fn resource_constrained_scheduling_skips_heavy_task() {
+        // Only 2 CPU cores available — heavy task (4 cores) should be skipped
+        // in favor of a lighter task (1 core) even though heavy has higher priority.
+        let sched = Scheduler::new(ResourceModel::new(2, 8192, 1, 4));
+
+        let mut heavy = WorkItem::new(
+            1,
+            "heavy",
+            "repo",
+            "main",
+            Priority::Interactive,
+            vec![],
+            4,
+            512,
+            false,
+            None,
+            0,
+        );
+        heavy.required_cpu_cores = 4; // needs 4 but only 2 available
+
+        let light = WorkItem::new(
+            2,
+            "light",
+            "repo",
+            "main",
+            Priority::Batch,
+            vec![],
+            1,
+            512,
+            false,
+            None,
+            0,
+        );
+
+        sched.enqueue(heavy).unwrap();
+        sched.enqueue(light).unwrap();
+
+        // next_task should skip the heavy Interactive task and pick the light Batch task
+        let next = sched.next_task().unwrap();
+        assert_eq!(
+            next.id, 2,
+            "Should schedule lighter task when heavy task exceeds resources"
+        );
+        assert_eq!(next.priority, Priority::Batch);
     }
 }
