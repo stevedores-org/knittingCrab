@@ -1,3 +1,4 @@
+use crate::error::SchedulerError;
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
@@ -43,9 +44,9 @@ impl LeaseManager {
         ram: u64,
         gpu: bool,
         duration: Duration,
-    ) -> Result<Lease, String> {
+    ) -> Result<Lease, SchedulerError> {
         if self.has_active_lease(task_id) {
-            return Err(format!("Task {} already has an active lease", task_id));
+            return Err(SchedulerError::LeaseConflict { task_id });
         }
         let id = self.next_id;
         self.next_id += 1;
@@ -140,7 +141,9 @@ mod tests {
         mgr.grant_lease(42, 1, 1, 256, false, Duration::from_secs(60))
             .unwrap();
         let result = mgr.grant_lease(42, 2, 1, 256, false, Duration::from_secs(60));
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("already has an active lease"));
+        assert!(matches!(
+            result.unwrap_err(),
+            SchedulerError::LeaseConflict { task_id: 42 }
+        ));
     }
 }

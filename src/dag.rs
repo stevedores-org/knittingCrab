@@ -1,3 +1,4 @@
+use crate::error::SchedulerError;
 use crate::work_item::{TaskState, WorkItem};
 use std::collections::HashMap;
 
@@ -12,12 +13,12 @@ impl DagEngine {
         }
     }
 
-    pub fn add_task(&mut self, item: WorkItem) -> Result<(), String> {
+    pub fn add_task(&mut self, item: WorkItem) -> Result<(), SchedulerError> {
         let id = item.id;
         self.tasks.insert(id, item);
         if self.has_cycle() {
             self.tasks.remove(&id);
-            return Err(format!("Adding task {} would create a cycle", id));
+            return Err(SchedulerError::CycleDetected { task_id: id });
         }
         Ok(())
     }
@@ -159,6 +160,10 @@ mod tests {
         dag.add_task(make_task(1, vec![2])).unwrap();
         let result = dag.add_task(make_task(2, vec![1]));
         assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            SchedulerError::CycleDetected { task_id: 2 }
+        ));
     }
 
     #[test]
@@ -169,7 +174,6 @@ mod tests {
 
         dag.mark_failed(1, "something went wrong".into());
         let ready = dag.ready_tasks();
-        // Task 2 depends on task 1 which failed; it should NOT be ready
         assert!(!ready.contains(&2));
     }
 }
