@@ -28,6 +28,7 @@ impl ResourceModel {
         }
     }
 
+    #[must_use]
     pub fn can_allocate(&self, cpu: u32, ram: u64, gpu: bool) -> bool {
         self.available_cpu_cores >= cpu
             && self.available_ram_mb >= ram

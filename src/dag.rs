@@ -167,6 +167,32 @@ mod tests {
     }
 
     #[test]
+    fn dag_partial_failure_independent_siblings() {
+        // Tasks 2 and 3 both depend on 1. Task 4 is independent.
+        // If task 1 fails, tasks 2 and 3 are blocked, but task 4 stays ready.
+        let mut dag = DagEngine::new();
+        dag.add_task(make_task(1, vec![])).unwrap();
+        dag.add_task(make_task(2, vec![1])).unwrap();
+        dag.add_task(make_task(3, vec![1])).unwrap();
+        dag.add_task(make_task(4, vec![])).unwrap();
+
+        dag.mark_failed(1, "boom".into());
+        let ready = dag.ready_tasks();
+        assert!(
+            !ready.contains(&2),
+            "child of failed task should be blocked"
+        );
+        assert!(
+            !ready.contains(&3),
+            "child of failed task should be blocked"
+        );
+        assert!(
+            ready.contains(&4),
+            "independent sibling should still be ready"
+        );
+    }
+
+    #[test]
     fn partial_failure_propagates() {
         let mut dag = DagEngine::new();
         dag.add_task(make_task(1, vec![])).unwrap();

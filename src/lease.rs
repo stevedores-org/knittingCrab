@@ -15,6 +15,7 @@ pub struct Lease {
 }
 
 impl Lease {
+    #[must_use]
     pub fn is_expired(&self) -> bool {
         Instant::now() >= self.expires_at
     }

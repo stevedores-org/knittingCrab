@@ -34,10 +34,12 @@ impl Budget {
         }
     }
 
+    #[must_use]
     pub fn is_token_exhausted(&self) -> bool {
         self.used_tokens >= self.max_tokens
     }
 
+    #[must_use]
     pub fn is_time_exhausted(&self) -> bool {
         self.started_at.elapsed() >= self.max_duration
     }
