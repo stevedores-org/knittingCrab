@@ -394,6 +394,46 @@ mod tests {
     }
 
     #[test]
+    fn idempotent_complete() {
+        let sched = make_scheduler();
+        let task = make_task(1, Priority::Batch, vec![]);
+        sched.enqueue(task).unwrap();
+        let next = sched.next_task().unwrap();
+        let lease = sched
+            .schedule_task(next, 1, Duration::from_secs(60))
+            .unwrap();
+
+        // Complete once
+        sched.complete_task(lease.id, true, None, None);
+        assert!((sched.resource_utilization() - 0.0).abs() < f64::EPSILON);
+
+        // Complete again with same lease_id — should be a no-op (lease already revoked)
+        sched.complete_task(lease.id, true, None, None);
+        assert!((sched.resource_utilization() - 0.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn resource_release_on_failure() {
+        let sched = make_scheduler();
+        let mut task = make_task(1, Priority::Batch, vec![]);
+        task.max_retries = 0; // no retries — goes straight to failed
+        sched.enqueue(task).unwrap();
+        let next = sched.next_task().unwrap();
+        let lease = sched
+            .schedule_task(next, 1, Duration::from_secs(60))
+            .unwrap();
+
+        // Utilization should be non-zero while task is running
+        assert!(sched.resource_utilization() > 0.0);
+
+        // Fail the task
+        sched.complete_task(lease.id, false, Some(1), Some("crash".into()));
+
+        // Resources should be fully released
+        assert!((sched.resource_utilization() - 0.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
     fn resource_constrained_scheduling_skips_heavy_task() {
         // Only 2 CPU cores available — heavy task (4 cores) should be skipped
         // in favor of a lighter task (1 core) even though heavy has higher priority.

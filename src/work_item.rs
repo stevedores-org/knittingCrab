@@ -61,6 +61,8 @@ pub struct WorkItem {
 }
 
 impl WorkItem {
+    /// Creates a new work item. Returns `None` if goal/repo/branch are empty
+    /// or resource requirements are zero.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         id: u64,
@@ -97,24 +99,47 @@ impl WorkItem {
         }
     }
 
+    /// Validates that the work item has sensible fields. Returns an error message if invalid.
+    #[must_use]
+    pub fn validate(&self) -> Option<&'static str> {
+        if self.goal.is_empty() {
+            return Some("goal must not be empty");
+        }
+        if self.repo.is_empty() {
+            return Some("repo must not be empty");
+        }
+        if self.branch.is_empty() {
+            return Some("branch must not be empty");
+        }
+        if self.required_cpu_cores == 0 && self.required_ram_mb == 0 {
+            return Some("task must require at least some CPU or RAM");
+        }
+        None
+    }
+
+    #[must_use]
     pub fn compute_cache_key(&self) -> String {
         Self::compute_cache_key_from(&self.goal, &self.repo, &self.branch)
     }
 
+    /// Length-prefixed FNV-1a cache key to prevent separator collisions.
     fn compute_cache_key_from(goal: &str, repo: &str, branch: &str) -> String {
-        // Deterministic cache key using FNV-1a (stable across Rust versions and runs).
         const FNV_OFFSET_BASIS: u64 = 14695981039346656037;
         const FNV_PRIME: u64 = 1099511628211;
         let mut hash: u64 = FNV_OFFSET_BASIS;
-        for byte in goal
-            .bytes()
-            .chain(b"|".iter().copied())
-            .chain(repo.bytes())
-            .chain(b"|".iter().copied())
-            .chain(branch.bytes())
-        {
-            hash ^= byte as u64;
-            hash = hash.wrapping_mul(FNV_PRIME);
+
+        // Length-prefix each field to prevent collisions like
+        // ("a|b", "c") vs ("a", "b|c")
+        for field in &[goal, repo, branch] {
+            let len_bytes = (field.len() as u64).to_le_bytes();
+            for &byte in &len_bytes {
+                hash ^= byte as u64;
+                hash = hash.wrapping_mul(FNV_PRIME);
+            }
+            for byte in field.bytes() {
+                hash ^= byte as u64;
+                hash = hash.wrapping_mul(FNV_PRIME);
+            }
         }
         format!("{:016x}", hash)
     }
@@ -241,6 +266,125 @@ mod tests {
             3,
         );
         assert!(item.deadline.is_some());
+    }
+
+    #[test]
+    fn cache_key_determinism() {
+        // Same inputs must always produce the same key
+        let a = WorkItem::new(
+            1,
+            "goal",
+            "repo",
+            "main",
+            Priority::Batch,
+            vec![],
+            1,
+            512,
+            false,
+            None,
+            0,
+        );
+        let b = WorkItem::new(
+            1,
+            "goal",
+            "repo",
+            "main",
+            Priority::Batch,
+            vec![],
+            1,
+            512,
+            false,
+            None,
+            0,
+        );
+        assert_eq!(a.cache_key, b.cache_key);
+        assert_eq!(a.compute_cache_key(), b.compute_cache_key());
+    }
+
+    #[test]
+    fn cache_key_no_separator_collision() {
+        // Length-prefixed encoding means "a|b" + "c" != "a" + "b|c"
+        let x = WorkItem::new(
+            1,
+            "a|b",
+            "c",
+            "main",
+            Priority::Batch,
+            vec![],
+            1,
+            512,
+            false,
+            None,
+            0,
+        );
+        let y = WorkItem::new(
+            2,
+            "a",
+            "b|c",
+            "main",
+            Priority::Batch,
+            vec![],
+            1,
+            512,
+            false,
+            None,
+            0,
+        );
+        assert_ne!(x.cache_key, y.cache_key);
+    }
+
+    #[test]
+    fn input_validation_empty_goal() {
+        let item = WorkItem::new(
+            1,
+            "",
+            "repo",
+            "main",
+            Priority::Batch,
+            vec![],
+            1,
+            512,
+            false,
+            None,
+            0,
+        );
+        assert!(item.validate().is_some());
+    }
+
+    #[test]
+    fn input_validation_zero_resources() {
+        let item = WorkItem::new(
+            1,
+            "goal",
+            "repo",
+            "main",
+            Priority::Batch,
+            vec![],
+            0,
+            0,
+            false,
+            None,
+            0,
+        );
+        assert!(item.validate().is_some());
+    }
+
+    #[test]
+    fn input_validation_valid_item() {
+        let item = WorkItem::new(
+            1,
+            "goal",
+            "repo",
+            "main",
+            Priority::Batch,
+            vec![],
+            1,
+            512,
+            false,
+            None,
+            0,
+        );
+        assert!(item.validate().is_none());
     }
 
     #[test]
