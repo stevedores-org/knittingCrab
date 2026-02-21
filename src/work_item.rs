@@ -61,6 +61,7 @@ pub struct WorkItem {
 }
 
 impl WorkItem {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         id: u64,
         goal: impl Into<String>,
@@ -105,7 +106,13 @@ impl WorkItem {
         const FNV_OFFSET_BASIS: u64 = 14695981039346656037;
         const FNV_PRIME: u64 = 1099511628211;
         let mut hash: u64 = FNV_OFFSET_BASIS;
-        for byte in goal.bytes().chain(b"|".iter().copied()).chain(repo.bytes()).chain(b"|".iter().copied()).chain(branch.bytes()) {
+        for byte in goal
+            .bytes()
+            .chain(b"|".iter().copied())
+            .chain(repo.bytes())
+            .chain(b"|".iter().copied())
+            .chain(branch.bytes())
+        {
             hash ^= byte as u64;
             hash = hash.wrapping_mul(FNV_PRIME);
         }
@@ -130,8 +137,13 @@ impl PartialOrd for WorkItem {
 
 impl Ord for WorkItem {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        // Reverse priority rank: lower rank (higher priority) is Greater
-        other.priority.rank().cmp(&self.priority.rank())
+        // Reverse priority rank: lower rank (higher priority) is Greater.
+        // Within the same priority, older tasks (lower id) are scheduled first.
+        other
+            .priority
+            .rank()
+            .cmp(&self.priority.rank())
+            .then_with(|| other.id.cmp(&self.id))
     }
 }
 
@@ -142,8 +154,32 @@ mod tests {
 
     #[test]
     fn priority_orders_correctly() {
-        let realtime = WorkItem::new(1, "a", "r", "main", Priority::Realtime, vec![], 1, 512, false, None, 0);
-        let batch = WorkItem::new(2, "b", "r", "main", Priority::Batch, vec![], 1, 512, false, None, 0);
+        let realtime = WorkItem::new(
+            1,
+            "a",
+            "r",
+            "main",
+            Priority::Realtime,
+            vec![],
+            1,
+            512,
+            false,
+            None,
+            0,
+        );
+        let batch = WorkItem::new(
+            2,
+            "b",
+            "r",
+            "main",
+            Priority::Batch,
+            vec![],
+            1,
+            512,
+            false,
+            None,
+            0,
+        );
 
         let mut heap = BinaryHeap::new();
         heap.push(batch);
@@ -154,29 +190,87 @@ mod tests {
     }
 
     #[test]
-    fn fairness_prevents_starvation() {
+    fn fairness_older_tasks_scheduled_first_within_same_priority() {
         let mut heap = BinaryHeap::new();
-        for i in 0..10 {
-            heap.push(WorkItem::new(i, format!("goal{}", i), "r", "main", Priority::Batch, vec![], 1, 512, false, None, 0));
+        // Insert in reverse order — id 9 first, id 0 last
+        for i in (0..10).rev() {
+            heap.push(WorkItem::new(
+                i,
+                format!("goal{}", i),
+                "r",
+                "main",
+                Priority::Batch,
+                vec![],
+                1,
+                512,
+                false,
+                None,
+                0,
+            ));
         }
-        let mut count = 0;
-        while heap.pop().is_some() {
-            count += 1;
+        // Older tasks (lower id) should be popped first
+        let mut prev_id = None;
+        while let Some(item) = heap.pop() {
+            if let Some(prev) = prev_id {
+                assert!(
+                    item.id > prev,
+                    "Expected ascending id order (older first), got {} after {}",
+                    item.id,
+                    prev
+                );
+            }
+            prev_id = Some(item.id);
         }
-        assert_eq!(count, 10);
+        assert_eq!(prev_id, Some(9));
     }
 
     #[test]
     fn deadline_tasks_handled() {
         let deadline = Instant::now() + std::time::Duration::from_secs(60);
-        let item = WorkItem::new(1, "goal", "repo", "main", Priority::Interactive, vec![], 1, 512, false, Some(deadline), 3);
+        let item = WorkItem::new(
+            1,
+            "goal",
+            "repo",
+            "main",
+            Priority::Interactive,
+            vec![],
+            1,
+            512,
+            false,
+            Some(deadline),
+            3,
+        );
         assert!(item.deadline.is_some());
     }
 
     #[test]
     fn same_task_same_inputs_same_cache_key() {
-        let a = WorkItem::new(1, "goal", "repo", "main", Priority::Batch, vec![], 1, 512, false, None, 0);
-        let b = WorkItem::new(2, "goal", "repo", "main", Priority::Realtime, vec![], 2, 1024, true, None, 0);
+        let a = WorkItem::new(
+            1,
+            "goal",
+            "repo",
+            "main",
+            Priority::Batch,
+            vec![],
+            1,
+            512,
+            false,
+            None,
+            0,
+        );
+        let b = WorkItem::new(
+            2,
+            "goal",
+            "repo",
+            "main",
+            Priority::Realtime,
+            vec![],
+            2,
+            1024,
+            true,
+            None,
+            0,
+        );
         assert_eq!(a.cache_key, b.cache_key);
     }
 }

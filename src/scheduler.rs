@@ -14,6 +14,8 @@ pub struct SchedulerInner {
     pub leases: LeaseManager,
     pub goal_locks: HashMap<String, u64>,
     pub cache: HashMap<String, TaskState>,
+    /// Exit codes that are eligible for retry. If empty, all failures are retryable.
+    pub retryable_exit_codes: Vec<i32>,
 }
 
 pub struct Scheduler {
@@ -30,8 +32,17 @@ impl Scheduler {
                 leases: LeaseManager::new(),
                 goal_locks: HashMap::new(),
                 cache: HashMap::new(),
+                retryable_exit_codes: vec![],
             })),
         }
+    }
+
+    pub fn with_retryable_exit_codes(self, codes: Vec<i32>) -> Self {
+        {
+            let mut inner = self.inner.write().unwrap();
+            inner.retryable_exit_codes = codes;
+        }
+        self
     }
 
     pub fn enqueue(&self, item: WorkItem) -> Result<(), String> {
@@ -44,7 +55,8 @@ impl Scheduler {
     /// Returns the highest-priority task that has all dependencies met and sufficient resources.
     pub fn next_task(&self) -> Option<WorkItem> {
         let mut inner = self.inner.write().unwrap();
-        let ready_ids: std::collections::HashSet<u64> = inner.dag.ready_tasks().into_iter().collect();
+        let ready_ids: std::collections::HashSet<u64> =
+            inner.dag.ready_tasks().into_iter().collect();
 
         // Drain the heap to find the best eligible task, then put the rest back.
         let mut candidates: Vec<WorkItem> = Vec::new();
@@ -55,7 +67,11 @@ impl Scheduler {
                 candidates.push(item);
                 continue;
             }
-            if inner.resources.can_allocate(item.required_cpu_cores, item.required_ram_mb, item.requires_gpu) {
+            if inner.resources.can_allocate(
+                item.required_cpu_cores,
+                item.required_ram_mb,
+                item.requires_gpu,
+            ) {
                 chosen = Some(item);
                 break;
             }
@@ -82,7 +98,11 @@ impl Scheduler {
         lease_duration: Duration,
     ) -> Result<Lease, String> {
         let mut inner = self.inner.write().unwrap();
-        inner.resources.allocate(task.required_cpu_cores, task.required_ram_mb, task.requires_gpu)?;
+        inner.resources.allocate(
+            task.required_cpu_cores,
+            task.required_ram_mb,
+            task.requires_gpu,
+        )?;
         if let Some(dag_task) = inner.dag.get_task_mut(task.id) {
             dag_task.state = TaskState::Running;
         }
@@ -93,18 +113,47 @@ impl Scheduler {
             task.required_ram_mb,
             task.requires_gpu,
             lease_duration,
-        );
+        )?;
         Ok(lease)
     }
 
-    pub fn complete_task(&self, lease_id: u64, success: bool, reason: Option<String>) {
+    /// Completes a task. On failure, retries if the exit code is retryable and
+    /// retries remain; otherwise marks the task as permanently failed.
+    pub fn complete_task(
+        &self,
+        lease_id: u64,
+        success: bool,
+        exit_code: Option<i32>,
+        reason: Option<String>,
+    ) {
         let mut inner = self.inner.write().unwrap();
         if let Some(lease) = inner.leases.revoke_lease(lease_id) {
-            inner.resources.release(lease.cpu_cores, lease.ram_mb, lease.gpu);
+            inner
+                .resources
+                .release(lease.cpu_cores, lease.ram_mb, lease.gpu);
             if success {
                 inner.dag.mark_success(lease.task_id);
             } else {
-                inner.dag.mark_failed(lease.task_id, reason.unwrap_or_else(|| "No failure reason provided".into()));
+                let is_retryable = Self::is_retryable(&inner.retryable_exit_codes, exit_code);
+                let can_retry = if let Some(task) = inner.dag.get_task_mut(lease.task_id) {
+                    is_retryable && task.retry_count < task.max_retries
+                } else {
+                    false
+                };
+
+                if can_retry {
+                    if let Some(task) = inner.dag.get_task_mut(lease.task_id) {
+                        task.retry_count += 1;
+                        task.state = TaskState::Pending;
+                        let cloned = task.clone();
+                        inner.queue.push(cloned);
+                    }
+                } else {
+                    inner.dag.mark_failed(
+                        lease.task_id,
+                        reason.unwrap_or_else(|| "No failure reason provided".into()),
+                    );
+                }
             }
         }
     }
@@ -115,7 +164,9 @@ impl Scheduler {
         let expired = inner.leases.expired_leases();
         for lease in expired {
             inner.leases.revoke_lease(lease.id);
-            inner.resources.release(lease.cpu_cores, lease.ram_mb, lease.gpu);
+            inner
+                .resources
+                .release(lease.cpu_cores, lease.ram_mb, lease.gpu);
             if let Some(task) = inner.dag.get_task_mut(lease.task_id) {
                 task.state = TaskState::Pending;
                 let cloned = task.clone();
@@ -148,6 +199,18 @@ impl Scheduler {
         let mut inner = self.inner.write().unwrap();
         inner.cache.insert(cache_key, state);
     }
+
+    fn is_retryable(retryable_codes: &[i32], exit_code: Option<i32>) -> bool {
+        if retryable_codes.is_empty() {
+            // No codes configured: all failures are retryable
+            return true;
+        }
+        match exit_code {
+            Some(code) => retryable_codes.contains(&code),
+            // No exit code provided: treat as non-retryable when codes are configured
+            None => false,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -160,13 +223,27 @@ mod tests {
     }
 
     fn make_task(id: u64, priority: Priority, deps: Vec<u64>) -> WorkItem {
-        WorkItem::new(id, format!("goal{}", id), "repo", "main", priority, deps, 1, 512, false, None, 3)
+        WorkItem::new(
+            id,
+            format!("goal{}", id),
+            "repo",
+            "main",
+            priority,
+            deps,
+            1,
+            512,
+            false,
+            None,
+            3,
+        )
     }
 
     #[test]
     fn enqueue_and_dequeue() {
         let sched = make_scheduler();
-        sched.enqueue(make_task(1, Priority::Batch, vec![])).unwrap();
+        sched
+            .enqueue(make_task(1, Priority::Batch, vec![]))
+            .unwrap();
         let task = sched.next_task();
         assert!(task.is_some());
     }
@@ -179,7 +256,6 @@ mod tests {
         assert!(first);
         assert!(!second);
         sched.release_goal_lock("deploy");
-        // After release, a third agent should be able to acquire
         let third = sched.acquire_goal_lock("deploy", 3);
         assert!(third);
     }
@@ -200,12 +276,16 @@ mod tests {
         let task = make_task(1, Priority::Batch, vec![]);
         sched.enqueue(task.clone()).unwrap();
         let next = sched.next_task().unwrap();
-        let lease = sched.schedule_task(next, 1, Duration::from_secs(60)).unwrap();
-        sched.complete_task(lease.id, true, None);
-        // Resources should be released; we can allocate again
+        let lease = sched
+            .schedule_task(next, 1, Duration::from_secs(60))
+            .unwrap();
+        sched.complete_task(lease.id, true, None, None);
         {
             let inner = sched.inner.read().unwrap();
-            assert_eq!(inner.resources.available_cpu_cores, inner.resources.total_cpu_cores);
+            assert_eq!(
+                inner.resources.available_cpu_cores,
+                inner.resources.total_cpu_cores
+            );
         }
     }
 
@@ -215,12 +295,110 @@ mod tests {
         let task = make_task(1, Priority::Batch, vec![]);
         sched.enqueue(task.clone()).unwrap();
         let next = sched.next_task().unwrap();
-        let lease = sched.schedule_task(next, 1, Duration::from_millis(1)).unwrap();
+        let lease = sched
+            .schedule_task(next, 1, Duration::from_millis(1))
+            .unwrap();
         std::thread::sleep(Duration::from_millis(5));
         sched.requeue_expired_leases();
-        // Task should be back in the queue
         let requeued = sched.next_task();
         assert!(requeued.is_some());
         assert_eq!(requeued.unwrap().id, lease.task_id);
+    }
+
+    #[test]
+    fn duplicate_lease_prevention() {
+        let sched = make_scheduler();
+        let task = make_task(1, Priority::Batch, vec![]);
+        sched.enqueue(task.clone()).unwrap();
+        let next = sched.next_task().unwrap();
+        let _lease = sched
+            .schedule_task(next.clone(), 1, Duration::from_secs(60))
+            .unwrap();
+        // Second lease for the same task should fail
+        let result = sched.schedule_task(next, 2, Duration::from_secs(60));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn permanent_fail_after_max_attempts() {
+        let sched = make_scheduler();
+        // max_retries = 2, so task gets 2 retries (3 total attempts)
+        let mut task = make_task(1, Priority::Batch, vec![]);
+        task.max_retries = 2;
+        sched.enqueue(task).unwrap();
+
+        for attempt in 0..3 {
+            let next = sched.next_task().unwrap();
+            assert_eq!(next.id, 1, "attempt {}", attempt);
+            let lease = sched
+                .schedule_task(next, 1, Duration::from_secs(60))
+                .unwrap();
+            sched.complete_task(lease.id, false, Some(1), Some("oops".into()));
+        }
+        // After exhausting retries, task should not be re-queued
+        assert!(
+            sched.next_task().is_none(),
+            "Task should be permanently failed after max retries"
+        );
+    }
+
+    #[test]
+    fn retry_only_on_retryable_exit_codes() {
+        let sched =
+            Scheduler::new(ResourceModel::new(8, 8192, 1, 4)).with_retryable_exit_codes(vec![75]);
+
+        let mut task = make_task(1, Priority::Batch, vec![]);
+        task.max_retries = 3;
+        sched.enqueue(task).unwrap();
+
+        // Fail with non-retryable exit code 1 — should NOT retry
+        let next = sched.next_task().unwrap();
+        let lease = sched
+            .schedule_task(next, 1, Duration::from_secs(60))
+            .unwrap();
+        sched.complete_task(lease.id, false, Some(1), Some("bad exit".into()));
+
+        assert!(
+            sched.next_task().is_none(),
+            "Non-retryable exit code should cause permanent failure"
+        );
+
+        // Now test with a retryable exit code
+        let sched2 =
+            Scheduler::new(ResourceModel::new(8, 8192, 1, 4)).with_retryable_exit_codes(vec![75]);
+        let mut task2 = make_task(2, Priority::Batch, vec![]);
+        task2.max_retries = 3;
+        sched2.enqueue(task2).unwrap();
+
+        let next2 = sched2.next_task().unwrap();
+        let lease2 = sched2
+            .schedule_task(next2, 1, Duration::from_secs(60))
+            .unwrap();
+        sched2.complete_task(lease2.id, false, Some(75), Some("retryable".into()));
+
+        assert!(
+            sched2.next_task().is_some(),
+            "Retryable exit code should re-queue the task"
+        );
+    }
+
+    #[test]
+    fn cached_failure_policy_configurable() {
+        let sched = make_scheduler();
+        let task = make_task(1, Priority::Batch, vec![]);
+        let key = task.cache_key.clone();
+
+        // Store a cached failure
+        sched.store_cache(key.clone(), TaskState::Failed("previous run".into()));
+
+        // Verify the cache returns the failure
+        let cached = sched.check_cache(&key);
+        assert!(matches!(cached, Some(TaskState::Failed(_))));
+
+        // Policy: caller can choose to skip or re-execute based on cached state.
+        // Overwrite cache to simulate a policy that clears failed cache entries.
+        sched.store_cache(key.clone(), TaskState::Pending);
+        let cleared = sched.check_cache(&key);
+        assert_eq!(cleared, Some(TaskState::Pending));
     }
 }
