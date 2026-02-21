@@ -227,7 +227,7 @@ mod tests {
     }
 
     fn make_task(id: u64, priority: Priority, deps: Vec<u64>) -> WorkItem {
-        WorkItem::new(
+        WorkItem::new_simple(
             id,
             format!("goal{}", id),
             "repo",
@@ -439,7 +439,7 @@ mod tests {
         // in favor of a lighter task (1 core) even though heavy has higher priority.
         let sched = Scheduler::new(ResourceModel::new(2, 8192, 1, 4));
 
-        let mut heavy = WorkItem::new(
+        let mut heavy = WorkItem::new_simple(
             1,
             "heavy",
             "repo",
@@ -454,7 +454,7 @@ mod tests {
         );
         heavy.required_cpu_cores = 4; // needs 4 but only 2 available
 
-        let light = WorkItem::new(
+        let light = WorkItem::new_simple(
             2,
             "light",
             "repo",

@@ -99,7 +99,7 @@ mod tests {
     use crate::work_item::Priority;
 
     fn make_task(id: u64) -> WorkItem {
-        WorkItem::new(
+        WorkItem::new_simple(
             id,
             format!("goal{}", id),
             "repo",
