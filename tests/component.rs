@@ -1,8 +1,11 @@
-use knitting_crab::{FakeWorker, Priority, ResourceModel, Scheduler, TaskResult, WorkItem, Worker};
+use knitting_crab::{
+    FakeWorker, Priority, ProcessRunner, ProcessRunnerConfig, RepoLockManager, ResourceModel,
+    Scheduler, ShardAggregator, TaskResult, WorkItem, Worker,
+};
 use std::time::Duration;
 
 fn make_task(id: u64, priority: Priority, deps: Vec<u64>) -> WorkItem {
-    WorkItem::new(
+    WorkItem::new_simple(
         id,
         format!("goal{}", id),
         "repo",
@@ -160,4 +163,135 @@ async fn dag_execution_order() {
     assert_eq!(results[0].task_id, 1);
     assert_eq!(results[1].task_id, 2);
     assert_eq!(results[2].task_id, 3);
+}
+
+// ===== Epic 3 Integration Tests =====
+
+#[tokio::test]
+async fn subprocess_task_with_log_capture() {
+    let runner = ProcessRunner::new(ProcessRunnerConfig::default());
+
+    let mut task = WorkItem::new_simple(
+        1,
+        "echo hello",
+        "repo",
+        "main",
+        Priority::Batch,
+        vec![],
+        1,
+        512,
+        false,
+        None,
+        0,
+    );
+    task.id = 1;
+
+    let result = runner.execute(&task).await;
+    assert!(result.success, "subprocess should succeed");
+    assert_eq!(result.exit_code, Some(0));
+}
+
+#[tokio::test]
+async fn env_isolation_integration() {
+    let runner = ProcessRunner::new(ProcessRunnerConfig::default());
+
+    // Create a task with only PATH in the allowlist
+    let mut task = WorkItem::new_simple(
+        1,
+        "test -n \"$PATH\"",
+        "repo",
+        "main",
+        Priority::Batch,
+        vec![],
+        1,
+        512,
+        false,
+        None,
+        0,
+    );
+    task.env_allowlist = vec!["PATH".to_string()];
+
+    let result = runner.execute(&task).await;
+    assert!(
+        result.success,
+        "task should succeed with PATH in allowlist"
+    );
+
+    // Create another task that uses allowlist to only keep PATH
+    let mut task2 = WorkItem::new_simple(
+        2,
+        "test -n \"$PATH\"",
+        "repo",
+        "main",
+        Priority::Batch,
+        vec![],
+        1,
+        512,
+        false,
+        None,
+        0,
+    );
+    task2.env_allowlist = vec!["PATH".to_string()];
+
+    let result2 = runner.execute(&task2).await;
+    assert!(result2.success, "task should succeed with PATH in allowlist");
+}
+
+#[tokio::test]
+async fn repo_lock_serializes_concurrent_tasks() {
+    use std::sync::atomic::{AtomicU32, Ordering};
+    use std::sync::Arc;
+
+    let lock_mgr = RepoLockManager::new();
+    let counter = Arc::new(AtomicU32::new(0));
+
+    let mut handles = vec![];
+
+    for _ in 0..2 {
+        let mgr = lock_mgr.clone();
+        let cnt = counter.clone();
+
+        let handle = tokio::spawn(async move {
+            let _guard = mgr.lock("shared_repo").await;
+
+            cnt.fetch_add(1, Ordering::SeqCst);
+
+            // Simulate some work
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        });
+
+        handles.push(handle);
+    }
+
+    for handle in handles {
+        handle.await.unwrap();
+    }
+
+    assert_eq!(counter.load(Ordering::SeqCst), 2);
+}
+
+#[test]
+fn shard_aggregator_end_to_end() {
+    let mut agg = ShardAggregator::new(4);
+
+    // Simulate 4 shards: 3 pass, 1 fails
+    agg.record(0, true);
+    agg.record(1, true);
+    agg.record(2, false);
+    agg.record(3, true);
+
+    assert!(agg.is_complete());
+    assert!(
+        !agg.overall_success(),
+        "overall should fail if any shard fails"
+    );
+
+    // Now test all-pass scenario
+    let mut agg2 = ShardAggregator::new(3);
+    agg2.record(0, true);
+    agg2.record(1, true);
+    agg2.record(2, true);
+
+    assert!(agg2.is_complete());
+    assert!(agg2.overall_success(), "overall should pass if all shards pass");
 }

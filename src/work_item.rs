@@ -1,4 +1,11 @@
+use std::path::PathBuf;
 use std::time::Instant;
+
+#[derive(Debug, Clone)]
+pub struct ShardConfig {
+    pub total_shards: u32,
+    pub shard_index: u32,   // 0-based
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Priority {
@@ -58,11 +65,16 @@ pub struct WorkItem {
     pub retry_count: u32,
     pub state: TaskState,
     pub cache_key: String,
+    pub working_dir: Option<PathBuf>,
+    pub env_allowlist: Vec<String>,
+    pub env_denylist: Vec<String>,
+    pub shard_config: Option<ShardConfig>,
 }
 
 impl WorkItem {
-    /// Creates a new work item. Returns `None` if goal/repo/branch are empty
-    /// or resource requirements are zero.
+    /// Creates a new work item with extended configuration including working directory,
+    /// environment filtering, and shard configuration. Returns `None` if goal/repo/branch
+    /// are empty or resource requirements are zero.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         id: u64,
@@ -76,6 +88,10 @@ impl WorkItem {
         requires_gpu: bool,
         deadline: Option<Instant>,
         max_retries: u32,
+        working_dir: Option<PathBuf>,
+        env_allowlist: Vec<String>,
+        env_denylist: Vec<String>,
+        shard_config: Option<ShardConfig>,
     ) -> Self {
         let goal = goal.into();
         let repo = repo.into();
@@ -96,7 +112,46 @@ impl WorkItem {
             retry_count: 0,
             state: TaskState::Pending,
             cache_key,
+            working_dir,
+            env_allowlist,
+            env_denylist,
+            shard_config,
         }
+    }
+
+    /// Creates a new work item with default environment and no special configuration.
+    /// Kept for backward compatibility.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_simple(
+        id: u64,
+        goal: impl Into<String>,
+        repo: impl Into<String>,
+        branch: impl Into<String>,
+        priority: Priority,
+        dependencies: Vec<u64>,
+        required_cpu_cores: u32,
+        required_ram_mb: u64,
+        requires_gpu: bool,
+        deadline: Option<Instant>,
+        max_retries: u32,
+    ) -> Self {
+        Self::new(
+            id,
+            goal,
+            repo,
+            branch,
+            priority,
+            dependencies,
+            required_cpu_cores,
+            required_ram_mb,
+            requires_gpu,
+            deadline,
+            max_retries,
+            None,
+            vec![],
+            vec![],
+            None,
+        )
     }
 
     /// Validates that the work item has sensible fields. Returns an error message if invalid.
@@ -177,9 +232,31 @@ mod tests {
     use super::*;
     use std::collections::BinaryHeap;
 
+    // Test helper for backward compatibility with existing tests
+    impl WorkItem {
+        fn new_test(
+            id: u64,
+            goal: impl Into<String>,
+            repo: impl Into<String>,
+            branch: impl Into<String>,
+            priority: Priority,
+            dependencies: Vec<u64>,
+            required_cpu_cores: u32,
+            required_ram_mb: u64,
+            requires_gpu: bool,
+            deadline: Option<Instant>,
+            max_retries: u32,
+        ) -> Self {
+            Self::new_simple(
+                id, goal, repo, branch, priority, dependencies,
+                required_cpu_cores, required_ram_mb, requires_gpu, deadline, max_retries,
+            )
+        }
+    }
+
     #[test]
     fn priority_orders_correctly() {
-        let realtime = WorkItem::new(
+        let realtime = WorkItem::new_simple(
             1,
             "a",
             "r",
@@ -192,7 +269,7 @@ mod tests {
             None,
             0,
         );
-        let batch = WorkItem::new(
+        let batch = WorkItem::new_simple(
             2,
             "b",
             "r",
@@ -219,7 +296,7 @@ mod tests {
         let mut heap = BinaryHeap::new();
         // Insert in reverse order — id 9 first, id 0 last
         for i in (0..10).rev() {
-            heap.push(WorkItem::new(
+            heap.push(WorkItem::new_test(
                 i,
                 format!("goal{}", i),
                 "r",
@@ -252,7 +329,7 @@ mod tests {
     #[test]
     fn deadline_tasks_handled() {
         let deadline = Instant::now() + std::time::Duration::from_secs(60);
-        let item = WorkItem::new(
+        let item = WorkItem::new_test(
             1,
             "goal",
             "repo",
@@ -271,7 +348,7 @@ mod tests {
     #[test]
     fn cache_key_determinism() {
         // Same inputs must always produce the same key
-        let a = WorkItem::new(
+        let a = WorkItem::new_test(
             1,
             "goal",
             "repo",
@@ -284,7 +361,7 @@ mod tests {
             None,
             0,
         );
-        let b = WorkItem::new(
+        let b = WorkItem::new_test(
             1,
             "goal",
             "repo",
@@ -304,7 +381,7 @@ mod tests {
     #[test]
     fn cache_key_no_separator_collision() {
         // Length-prefixed encoding means "a|b" + "c" != "a" + "b|c"
-        let x = WorkItem::new(
+        let x = WorkItem::new_test(
             1,
             "a|b",
             "c",
@@ -317,7 +394,7 @@ mod tests {
             None,
             0,
         );
-        let y = WorkItem::new(
+        let y = WorkItem::new_test(
             2,
             "a",
             "b|c",
@@ -335,7 +412,7 @@ mod tests {
 
     #[test]
     fn input_validation_empty_goal() {
-        let item = WorkItem::new(
+        let item = WorkItem::new_test(
             1,
             "",
             "repo",
@@ -353,7 +430,7 @@ mod tests {
 
     #[test]
     fn input_validation_zero_resources() {
-        let item = WorkItem::new(
+        let item = WorkItem::new_test(
             1,
             "goal",
             "repo",
@@ -371,7 +448,7 @@ mod tests {
 
     #[test]
     fn input_validation_valid_item() {
-        let item = WorkItem::new(
+        let item = WorkItem::new_test(
             1,
             "goal",
             "repo",
@@ -389,7 +466,7 @@ mod tests {
 
     #[test]
     fn same_task_same_inputs_same_cache_key() {
-        let a = WorkItem::new(
+        let a = WorkItem::new_test(
             1,
             "goal",
             "repo",
@@ -402,7 +479,7 @@ mod tests {
             None,
             0,
         );
-        let b = WorkItem::new(
+        let b = WorkItem::new_test(
             2,
             "goal",
             "repo",

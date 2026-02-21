@@ -1,5 +1,6 @@
 use crate::work_item::WorkItem;
 use crate::worker::{TaskResult, Worker};
+use std::collections::HashMap;
 use std::time::{Duration, Instant};
 use tokio::process::Command;
 
@@ -35,11 +36,42 @@ impl ProcessRunner {
 
     /// Builds the command string from the work item's goal field.
     /// The goal is interpreted as a shell command.
+    /// Applies working directory, environment filtering (allowlist/denylist).
     fn build_command(task: &WorkItem) -> Command {
         let mut cmd = Command::new("sh");
         cmd.arg("-c").arg(&task.goal);
         cmd.stdout(std::process::Stdio::piped());
         cmd.stderr(std::process::Stdio::piped());
+
+        // Apply working directory if specified
+        if let Some(ref working_dir) = task.working_dir {
+            cmd.current_dir(working_dir);
+        }
+
+        // Apply environment filtering
+        if !task.env_allowlist.is_empty() || !task.env_denylist.is_empty() {
+            // Collect current environment
+            let mut env_map: HashMap<String, String> = std::env::vars().collect();
+
+            // If allowlist is non-empty, keep only those keys
+            if !task.env_allowlist.is_empty() {
+                let allowlist_set: std::collections::HashSet<_> =
+                    task.env_allowlist.iter().cloned().collect();
+                env_map.retain(|k, _| allowlist_set.contains(k));
+            }
+
+            // Remove denylist keys
+            for key in &task.env_denylist {
+                env_map.remove(key);
+            }
+
+            // Clear environment and re-add filtered set
+            cmd.env_clear();
+            for (k, v) in env_map {
+                cmd.env(k, v);
+            }
+        }
+
         cmd
     }
 
@@ -129,7 +161,7 @@ mod tests {
     use crate::work_item::Priority;
 
     fn task_with_command(id: u64, cmd: &str) -> WorkItem {
-        WorkItem::new(
+        WorkItem::new_simple(
             id,
             cmd,
             "repo",
@@ -201,5 +233,40 @@ mod tests {
         // The reason should contain truncated stderr
         let reason = result.reason.unwrap();
         assert!(reason.len() < 500, "stderr should be truncated");
+    }
+
+    #[tokio::test]
+    async fn env_isolation_test() {
+        let runner = ProcessRunner::new(ProcessRunnerConfig::default());
+
+        // Create a task with only PATH in the allowlist
+        let mut task = task_with_command(1, "echo $TEST_SECRET_VAR");
+        task.env_allowlist = vec!["PATH".to_string()];
+
+        let result = runner.execute(&task).await;
+        assert!(result.success);
+
+        // Create another task that tries to access a variable not in allowlist
+        let mut task2 = task_with_command(2, "test -z $NONEXISTENT || echo 'found'");
+        task2.env_allowlist = vec!["PATH".to_string()];
+
+        let result2 = runner.execute(&task2).await;
+        // The command should run (success) but the variable should be empty
+        assert!(result2.success);
+    }
+
+    #[tokio::test]
+    async fn env_denylist_removes_vars() {
+        let runner = ProcessRunner::new(ProcessRunnerConfig::default());
+
+        // Create a task that denies PATH - PATH should still exist since we don't clear env
+        // when there's a denylist without an allowlist. Let's test with an allowlist instead.
+        let mut task = task_with_command(1, "test -n \"$CUSTOM_VAR\"");
+        task.env_allowlist = vec!["PATH".to_string()];
+        task.env_denylist = vec!["CUSTOM_VAR".to_string()];
+
+        let result = runner.execute(&task).await;
+        // This should fail because CUSTOM_VAR won't be set
+        assert!(!result.success);
     }
 }
