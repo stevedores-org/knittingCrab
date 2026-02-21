@@ -17,10 +17,10 @@ pub struct SchedulerPolicy {
     pub max_retries: u32,
 }
 
-impl SchedulerPolicy {
+impl Default for SchedulerPolicy {
     /// Returns a `SchedulerPolicy` with conservative, production-suitable
     /// defaults.
-    pub fn default() -> Self {
+    fn default() -> Self {
         Self {
             max_concurrent_tasks: 4,
             aging_interval_ticks: 10,
@@ -29,7 +29,9 @@ impl SchedulerPolicy {
             max_retries: 3,
         }
     }
+}
 
+impl SchedulerPolicy {
     /// Computes `base * 2^retry_count` as the back-off duration.
     ///
     /// The result is capped at ~2 hours to prevent absurdly long waits.
@@ -54,8 +56,8 @@ impl SchedulerPolicy {
     /// for at least `aging_interval_ticks` ticks, up to `max_age_bonus`.
     ///
     /// `tick` is the current scheduler tick counter.
-    pub fn apply_aging(&self, tasks: &mut Vec<WorkItem>, tick: u32) {
-        if tick % self.aging_interval_ticks.max(1) != 0 {
+    pub fn apply_aging(&self, tasks: &mut [WorkItem], tick: u32) {
+        if !tick.is_multiple_of(self.aging_interval_ticks.max(1)) {
             return;
         }
         for task in tasks.iter_mut() {
@@ -69,7 +71,7 @@ impl SchedulerPolicy {
     ///
     /// Ordering uses [`WorkItem::effective_priority_score`]: lower score ⟹
     /// higher urgency.
-    pub fn sort_by_effective_priority(tasks: &mut Vec<WorkItem>) {
+    pub fn sort_by_effective_priority(tasks: &mut [WorkItem]) {
         tasks.sort();
     }
 }

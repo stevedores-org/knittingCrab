@@ -3,41 +3,30 @@ use std::time::{Duration, SystemTime};
 
 use knitting_crab::{
     ArtifactCache, CacheEntry, CacheKey, LeaseManager, Plan, Priority, ResourceBudget,
-    ResourceModel, Scheduler, SchedulerPolicy, WorkItem,
+    ResourceModel, Scheduler, SchedulerPolicy, WorkItem, WorkItemBuilder,
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 fn simple_item(name: &str, priority: Priority) -> WorkItem {
-    WorkItem::new(
-        name,
-        "repo",
-        "main",
-        vec!["echo".to_owned(), "hi".to_owned()],
-        HashMap::new(),
-        priority,
-        ResourceBudget::new(1.0, 512, 0),
-        0,
-        30,
-        vec![],
-        None,
-    )
+    WorkItemBuilder::new(name, "repo", "main", vec!["echo".to_owned(), "hi".to_owned()])
+        .priority(priority)
+        .resource_budget(ResourceBudget::new(1.0, 512, 0))
+        .timeout_secs(30)
+        .build()
 }
 
 fn item_with_deps(name: &str, deps: Vec<String>) -> WorkItem {
-    WorkItem::new(
+    WorkItemBuilder::new(
         name,
         "repo",
         "main",
         vec!["echo".to_owned(), name.to_owned()],
-        HashMap::new(),
-        Priority::Normal,
-        ResourceBudget::new(1.0, 256, 0),
-        0,
-        30,
-        deps,
-        None,
     )
+    .resource_budget(ResourceBudget::new(1.0, 256, 0))
+    .timeout_secs(30)
+    .dependencies(deps)
+    .build()
 }
 
 // ── DAG Tests ─────────────────────────────────────────────────────────────────

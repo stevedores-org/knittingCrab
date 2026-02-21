@@ -27,5 +27,5 @@ pub use lease::{Lease, LeaseManager};
 pub use policy::SchedulerPolicy;
 pub use resources::ResourceModel;
 pub use scheduler::{Scheduler, SchedulerStats};
-pub use types::{AgentBudget, Priority, ResourceBudget, TaskStatus, WorkItem, WorkerEvent};
+pub use types::{AgentBudget, Priority, ResourceBudget, TaskStatus, WorkItem, WorkItemBuilder, WorkerEvent};
 pub use worker::AgentWorker;

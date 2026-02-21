@@ -125,42 +125,111 @@ pub struct WorkItem {
     pub priority_age_bonus: u32,
 }
 
-impl WorkItem {
-    /// Constructs a new `WorkItem` with the given core fields.
-    ///
-    /// `id` is generated via UUID v4.  `created_at` is set to `Instant::now()`
-    /// and `priority_age_bonus` is initialised to `0`.
+/// Builder for constructing a [`WorkItem`].
+///
+/// Required fields must be set before calling [`WorkItemBuilder::build`].
+#[derive(Default)]
+pub struct WorkItemBuilder {
+    name: String,
+    repo: String,
+    branch: String,
+    command: Vec<String>,
+    env: HashMap<String, String>,
+    priority: Option<Priority>,
+    resource_budget: Option<ResourceBudget>,
+    max_retries: u32,
+    timeout_secs: u64,
+    dependencies: Vec<String>,
+    goal_hash: Option<String>,
+}
+
+impl WorkItemBuilder {
+    /// Creates a new builder with required name, repo, branch, and command.
     pub fn new(
         name: impl Into<String>,
         repo: impl Into<String>,
         branch: impl Into<String>,
         command: Vec<String>,
-        env: HashMap<String, String>,
-        priority: Priority,
-        resource_budget: ResourceBudget,
-        max_retries: u32,
-        timeout_secs: u64,
-        dependencies: Vec<String>,
-        goal_hash: Option<String>,
     ) -> Self {
         Self {
-            id: uuid::Uuid::new_v4().to_string(),
             name: name.into(),
             repo: repo.into(),
             branch: branch.into(),
             command,
-            env,
-            priority,
-            resource_budget,
-            max_retries,
-            timeout_secs,
-            dependencies,
-            goal_hash,
+            ..Default::default()
+        }
+    }
+
+    /// Sets extra environment variables.
+    pub fn env(mut self, env: HashMap<String, String>) -> Self {
+        self.env = env;
+        self
+    }
+
+    /// Sets the scheduling priority (default: [`Priority::Normal`]).
+    pub fn priority(mut self, priority: Priority) -> Self {
+        self.priority = Some(priority);
+        self
+    }
+
+    /// Sets the resource budget (default: 1 CPU core, 256 MiB RAM, 0 Metal slots).
+    pub fn resource_budget(mut self, budget: ResourceBudget) -> Self {
+        self.resource_budget = Some(budget);
+        self
+    }
+
+    /// Sets the maximum number of automatic retries (default: `0`).
+    pub fn max_retries(mut self, retries: u32) -> Self {
+        self.max_retries = retries;
+        self
+    }
+
+    /// Sets the hard wall-clock timeout in seconds (default: `300`).
+    pub fn timeout_secs(mut self, secs: u64) -> Self {
+        self.timeout_secs = secs;
+        self
+    }
+
+    /// Sets the list of task IDs that must complete before this task starts.
+    pub fn dependencies(mut self, deps: Vec<String>) -> Self {
+        self.dependencies = deps;
+        self
+    }
+
+    /// Sets an optional goal hash for deduplication locking.
+    pub fn goal_hash(mut self, hash: impl Into<String>) -> Self {
+        self.goal_hash = Some(hash.into());
+        self
+    }
+
+    /// Builds the [`WorkItem`].
+    pub fn build(self) -> WorkItem {
+        WorkItem {
+            id: uuid::Uuid::new_v4().to_string(),
+            name: self.name,
+            repo: self.repo,
+            branch: self.branch,
+            command: self.command,
+            env: self.env,
+            priority: self.priority.unwrap_or(Priority::Normal),
+            resource_budget: self
+                .resource_budget
+                .unwrap_or_else(|| ResourceBudget::new(1.0, 256, 0)),
+            max_retries: self.max_retries,
+            timeout_secs: if self.timeout_secs == 0 {
+                300
+            } else {
+                self.timeout_secs
+            },
+            dependencies: self.dependencies,
+            goal_hash: self.goal_hash,
             created_at: Instant::now(),
             priority_age_bonus: 0,
         }
     }
+}
 
+impl WorkItem {
     /// Computes the effective priority score used for queue ordering.
     ///
     /// A *lower* return value means *higher* urgency (matching `Priority`'s
