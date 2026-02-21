@@ -102,10 +102,12 @@ impl WorkItem {
 
     fn compute_cache_key_from(goal: &str, repo: &str, branch: &str) -> String {
         // Deterministic cache key using FNV-1a (stable across Rust versions and runs).
-        let mut hash: u64 = 14695981039346656037;
+        const FNV_OFFSET_BASIS: u64 = 14695981039346656037;
+        const FNV_PRIME: u64 = 1099511628211;
+        let mut hash: u64 = FNV_OFFSET_BASIS;
         for byte in goal.bytes().chain(b"|".iter().copied()).chain(repo.bytes()).chain(b"|".iter().copied()).chain(branch.bytes()) {
             hash ^= byte as u64;
-            hash = hash.wrapping_mul(1099511628211);
+            hash = hash.wrapping_mul(FNV_PRIME);
         }
         format!("{:016x}", hash)
     }

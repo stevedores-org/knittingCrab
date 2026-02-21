@@ -55,7 +55,7 @@ impl DagEngine {
     }
 
     pub fn has_cycle(&self) -> bool {
-        // Kahn's algorithm / DFS cycle detection
+        // DFS cycle detection using three-color marking (White/Gray/Black)
         enum Color { White, Gray, Black }
         let mut colors: HashMap<u64, Color> = self.tasks.keys().map(|&id| (id, Color::White)).collect();
 

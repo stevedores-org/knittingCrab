@@ -8,7 +8,9 @@ pub struct BackoffStrategy {
 
 impl BackoffStrategy {
     pub fn compute_delay(&self, attempt: u32) -> Duration {
-        let factor = self.multiplier.powi(attempt as i32);
+        // Cap the exponent to avoid overflow in powi for large attempt counts.
+        let capped_attempt = attempt.min(63) as i32;
+        let factor = self.multiplier.powi(capped_attempt);
         let nanos = (self.base_delay.as_nanos() as f64 * factor) as u128;
         let computed = Duration::from_nanos(nanos.min(u64::MAX as u128) as u64);
         computed.min(self.max_delay)
