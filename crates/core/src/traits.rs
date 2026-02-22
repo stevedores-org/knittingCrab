@@ -11,7 +11,7 @@ use crate::resource::ResourceAllocation;
 use crate::retry::RetryPolicy;
 
 /// A task descriptor passed to a worker from the queue.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TaskDescriptor {
     pub task_id: TaskId,
     pub command: Vec<String>,

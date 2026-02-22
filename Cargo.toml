@@ -3,6 +3,9 @@ members = [
     "crates/core",
     "crates/worker",
     "crates/scheduler",
+    "crates/transport",
+    "crates/coordinator",
+    "crates/node",
 ]
 resolver = "2"
 

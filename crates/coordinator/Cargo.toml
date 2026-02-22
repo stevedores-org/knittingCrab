@@ -1,0 +1,21 @@
+[package]
+name = "knitting-crab-coordinator"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+knitting-crab-core = { path = "../core" }
+knitting-crab-worker = { path = "../worker" }
+knitting-crab-scheduler = { path = "../scheduler" }
+knitting-crab-transport = { path = "../transport" }
+tokio = { workspace = true }
+dashmap = { workspace = true }
+chrono = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true }
+
+[dev-dependencies]
+
+[lints]
+rust.warnings = "deny"
+rust.unsafe_code = "deny"

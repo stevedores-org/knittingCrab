@@ -1,0 +1,21 @@
+[package]
+name = "knitting-crab-node"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+knitting-crab-core = { path = "../core" }
+knitting-crab-worker = { path = "../worker" }
+knitting-crab-transport = { path = "../transport" }
+tokio = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true }
+uuid = { workspace = true }
+async-trait = { workspace = true }
+
+[dev-dependencies]
+knitting-crab-coordinator = { path = "../coordinator" }
+
+[lints]
+rust.warnings = "deny"
+rust.unsafe_code = "deny"
