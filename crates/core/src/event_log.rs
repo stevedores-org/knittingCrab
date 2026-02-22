@@ -39,24 +39,20 @@ impl MemoryEventLog {
 
     /// Get all events in chronological order.
     pub fn get_events(&self) -> Vec<TaskEvent> {
-        self.events
-            .read()
-            .unwrap()
-            .iter()
-            .map(|(_, e)| e.clone())
-            .collect()
+        let guard = self.events.read().unwrap_or_else(|e| e.into_inner());
+        guard.iter().map(|(_, e)| e.clone()).collect()
     }
 
     /// Get all logs in order.
     pub fn get_logs(&self) -> Vec<LogLine> {
-        self.logs.read().unwrap().iter().cloned().collect()
+        let guard = self.logs.read().unwrap_or_else(|e| e.into_inner());
+        guard.iter().cloned().collect()
     }
 
     /// Get events for a specific task.
     pub fn get_events_by_task(&self, task_id: TaskId) -> Vec<TaskEvent> {
-        self.events
-            .read()
-            .unwrap()
+        let guard = self.events.read().unwrap_or_else(|e| e.into_inner());
+        guard
             .iter()
             .filter(|(_, e)| match e {
                 TaskEvent::Acquired { task_id: tid, .. } => tid == &task_id,
@@ -72,16 +68,28 @@ impl MemoryEventLog {
     }
 
     /// Clear all events (for testing).
+    ///
+    /// On poisoned locks, recovers the inner data and clears it anyway —
+    /// consistent with the reader methods that also recover from poisoning.
     pub fn clear(&self) {
-        self.events.write().unwrap().clear();
-        self.logs.write().unwrap().clear();
+        self.events
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .clear();
+        self.logs
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .clear();
     }
 }
 
 #[async_trait::async_trait]
 impl EventSink for MemoryEventLog {
     async fn emit_event(&self, event: TaskEvent) -> Result<(), CoreError> {
-        let mut events = self.events.write().unwrap();
+        let mut events = self
+            .events
+            .write()
+            .map_err(|e| CoreError::LockPoisoned(format!("event buffer: {e}")))?;
         events.push_back((Utc::now(), event));
 
         // Maintain max size with FIFO eviction
@@ -93,7 +101,10 @@ impl EventSink for MemoryEventLog {
     }
 
     async fn emit_log(&self, log: LogLine) -> Result<(), CoreError> {
-        let mut logs = self.logs.write().unwrap();
+        let mut logs = self
+            .logs
+            .write()
+            .map_err(|e| CoreError::LockPoisoned(format!("log buffer: {e}")))?;
         logs.push_back(log);
 
         // Maintain max size with FIFO eviction
@@ -160,24 +171,34 @@ impl SqliteEventLog {
 
     /// Get events for a specific task.
     pub async fn get_events_by_task(&self, task_id: TaskId) -> Result<Vec<TaskEvent>, CoreError> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| CoreError::LockPoisoned(format!("event log: {e}")))?;
         let mut stmt = conn.prepare(
             "SELECT event_data FROM task_events WHERE task_id = ? ORDER BY timestamp ASC",
         )?;
 
-        let events = stmt
+        let rows: Vec<String> = stmt
             .query_map(params![task_id.to_string()], |row: &rusqlite::Row| {
-                let json: String = row.get(0)?;
-                Ok(serde_json::from_str(&json).unwrap())
+                row.get(0)
             })?
             .collect::<Result<Vec<_>, _>>()?;
 
-        Ok(events)
+        rows.iter()
+            .map(|json| {
+                serde_json::from_str(json)
+                    .map_err(|e| CoreError::Internal(format!("corrupt event JSON: {e}")))
+            })
+            .collect()
     }
 
     /// Get logs for a specific task.
     pub async fn get_logs_by_task(&self, task_id: TaskId) -> Result<Vec<LogLine>, CoreError> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| CoreError::LockPoisoned(format!("event log: {e}")))?;
         let mut stmt =
             conn.prepare("SELECT id FROM log_lines WHERE task_id = ? ORDER BY seq ASC")?;
 
@@ -196,7 +217,10 @@ impl SqliteEventLog {
 #[async_trait::async_trait]
 impl EventSink for SqliteEventLog {
     async fn emit_event(&self, event: TaskEvent) -> Result<(), CoreError> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| CoreError::LockPoisoned(format!("event log: {e}")))?;
         let task_id = match &event {
             TaskEvent::Acquired { task_id, .. } => task_id,
             TaskEvent::Started { task_id, .. } => task_id,
@@ -234,7 +258,10 @@ impl EventSink for SqliteEventLog {
     }
 
     async fn emit_log(&self, log: LogLine) -> Result<(), CoreError> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| CoreError::LockPoisoned(format!("event log: {e}")))?;
 
         conn.execute(
             "INSERT INTO log_lines (task_id, seq, source, content, timestamp)
