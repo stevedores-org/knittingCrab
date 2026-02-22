@@ -89,6 +89,7 @@ mod tests {
             policy: Default::default(),
             attempt: 0,
             is_critical: false,
+            priority: knitting_crab_core::Priority::Normal,
         };
         let worker_id = WorkerId::new();
 
