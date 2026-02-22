@@ -67,11 +67,12 @@ impl RemoteSessionManager {
     /// Check if repository directory exists on remote.
     fn check_repo_exists(&self, config: &SessionConfig) -> Result<(), SessionError> {
         let repo_path = config.repo_path();
+        let escaped_path = shell_escape::unix::escape(repo_path.as_str().into());
 
         let output = Command::new("ssh")
             .args(["-o", "ConnectTimeout=5"])
             .arg(self.remote.ssh_target())
-            .arg(format!("test -d {} && echo ok", repo_path))
+            .arg(format!("test -d {} && echo ok", escaped_path))
             .output()
             .map_err(|e| SessionError::ConnectionFailed(e.to_string()))?;
 
