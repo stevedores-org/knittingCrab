@@ -1,7 +1,6 @@
 use std::os::unix::process::{CommandExt, ExitStatusExt};
 use std::path::PathBuf;
-use std::process::Child as StdChild;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::timeout;
 
@@ -25,7 +24,7 @@ pub struct SpawnParams {
 pub struct ProcessHandle {
     #[allow(dead_code)]
     task_id: TaskId,
-    child: Arc<Mutex<StdChild>>,
+    child: tokio::process::Child,
     #[allow(dead_code)]
     sink: Arc<dyn EventSink>,
 }
@@ -33,51 +32,48 @@ pub struct ProcessHandle {
 impl ProcessHandle {
     /// Wait for the process to complete and return its outcome.
     pub async fn wait(&mut self) -> Result<ExitOutcome, WorkerError> {
-        let child = Arc::clone(&self.child);
-        tokio::task::spawn_blocking(move || {
-            let mut c = child.lock().unwrap();
-            c.wait()
-        })
-        .await
-        .map_err(|e| WorkerError::ProcessError(format!("spawn_blocking failed: {}", e)))?
-        .map(|status| {
-            if status.success() {
-                ExitOutcome::Success
-            } else if let Some(code) = status.code() {
-                ExitOutcome::FailedWithCode(code)
-            } else if let Some(signal) = status.signal() {
-                ExitOutcome::KilledBySignal(signal)
-            } else {
-                ExitOutcome::FailedWithCode(1)
-            }
-        })
-        .map_err(|e| WorkerError::ProcessError(format!("wait failed: {}", e)))
+        self.child
+            .wait()
+            .await
+            .map(|status| {
+                if status.success() {
+                    ExitOutcome::Success
+                } else if let Some(code) = status.code() {
+                    ExitOutcome::FailedWithCode(code)
+                } else if let Some(signal) = status.signal() {
+                    ExitOutcome::KilledBySignal(signal)
+                } else {
+                    ExitOutcome::FailedWithCode(1)
+                }
+            })
+            .map_err(|e| WorkerError::ProcessError(format!("wait failed: {}", e)))
     }
 
     /// Kill the process gracefully: SIGTERM → grace period → SIGKILL.
     pub async fn kill_gracefully(&mut self, grace: Duration) -> Result<ExitOutcome, WorkerError> {
         // Send SIGTERM to process group
-        let pid = {
-            let c = self.child.lock().unwrap();
-            c.id()
-        };
-
-        #[cfg(unix)]
-        {
-            use nix::sys::signal::{kill, Signal};
-            use nix::unistd::Pid;
-            let _ = kill(Pid::from_raw(-(pid as i32)), Signal::SIGTERM);
+        if let Some(pid) = self.child.id() {
+            #[cfg(unix)]
+            {
+                use nix::sys::signal::{kill, Signal};
+                use nix::unistd::Pid;
+                let _ = kill(Pid::from_raw(-(pid as i32)), Signal::SIGTERM);
+            }
+        } else {
+            // Process already exited?
+            // If child.id() returns None, the child has already been reaped (awaited).
+            // But we can check if it's done via wait (which might have completed).
+            // However, tokio Child id() returns Some unless the child has been consumed?
+            // tokio Child::id() returns Option<u32>. It returns None if the process has finished.
+            // If it finished, we can just return Success or whatever status it had?
+            // But kill_gracefully implies we want to stop it. If it's stopped, we are good.
+            // But we need the ExitOutcome.
+            // If it's already finished, `wait()` will return immediately.
         }
 
         // Wait with grace period
-        let child = Arc::clone(&self.child);
-        let wait_result = tokio::task::spawn_blocking(move || {
-            let mut c = child.lock().unwrap();
-            c.wait()
-        });
-
-        match timeout(grace, wait_result).await {
-            Ok(Ok(Ok(status))) => {
+        match timeout(grace, self.child.wait()).await {
+            Ok(Ok(status)) => {
                 if status.success() {
                     Ok(ExitOutcome::Success)
                 } else if let Some(code) = status.code() {
@@ -88,36 +84,29 @@ impl ProcessHandle {
                     Ok(ExitOutcome::FailedWithCode(1))
                 }
             }
-            Ok(Ok(Err(e))) => Err(WorkerError::ProcessError(format!("wait failed: {}", e))),
-            Ok(Err(e)) => Err(WorkerError::ProcessError(format!(
-                "spawn_blocking failed: {}",
-                e
-            ))),
+            Ok(Err(e)) => Err(WorkerError::ProcessError(format!("wait failed: {}", e))),
             Err(_) => {
                 // Timeout: send SIGKILL
-                #[cfg(unix)]
-                {
-                    use nix::sys::signal::{kill, Signal};
-                    use nix::unistd::Pid;
-                    let _ = kill(Pid::from_raw(-(pid as i32)), Signal::SIGKILL);
+                if let Some(pid) = self.child.id() {
+                    #[cfg(unix)]
+                    {
+                        use nix::sys::signal::{kill, Signal};
+                        use nix::unistd::Pid;
+                        let _ = kill(Pid::from_raw(-(pid as i32)), Signal::SIGKILL);
+                    }
                 }
 
-                let child = Arc::clone(&self.child);
-                match tokio::task::spawn_blocking(move || {
-                    let mut c = child.lock().unwrap();
-                    c.wait()
-                })
-                .await
-                {
-                    Ok(Ok(status)) => {
+                self.child
+                    .wait()
+                    .await
+                    .map(|status| {
                         if let Some(signal) = status.signal() {
-                            Ok(ExitOutcome::KilledBySignal(signal))
+                            ExitOutcome::KilledBySignal(signal)
                         } else {
-                            Ok(ExitOutcome::FailedWithCode(1))
+                            ExitOutcome::FailedWithCode(1)
                         }
-                    }
-                    _ => Ok(ExitOutcome::FailedWithCode(1)),
-                }
+                    })
+                    .map_err(|e| WorkerError::ProcessError(format!("wait failed: {}", e)))
             }
         }
     }
@@ -152,7 +141,10 @@ pub async fn spawn(
         });
     }
 
-    let mut child_std = cmd.spawn().map_err(|e| {
+    // Convert to tokio::process::Command
+    let mut tokio_cmd = tokio::process::Command::from(cmd);
+
+    let mut child = tokio_cmd.spawn().map_err(|e| {
         WorkerError::SpawnFailed(format!("failed to spawn {}: {}", params.command[0], e))
     })?;
 
@@ -160,26 +152,27 @@ pub async fn spawn(
     let sink_clone = Arc::clone(&sink);
 
     // Take stdout/stderr so we can read from them
-    let stdout = child_std.stdout.take();
-    let stderr = child_std.stderr.take();
+    let stdout = child.stdout.take();
+    let stderr = child.stderr.take();
 
     // Spawn async stdout reader
     if let Some(stdout) = stdout {
         let sink = Arc::clone(&sink_clone);
         tokio::spawn(async move {
-            use std::io::BufRead;
-            let reader = std::io::BufReader::new(stdout);
+            use tokio::io::AsyncBufReadExt;
+            let reader = tokio::io::BufReader::new(stdout);
+            let mut lines = reader.lines();
 
-            for (seq, line_result) in reader.lines().enumerate() {
-                if let Ok(line) = line_result {
-                    let log = knitting_crab_core::LogLine::new(
-                        task_id,
-                        seq as u64,
-                        LogSource::Stdout,
-                        line,
-                    );
-                    let _ = sink.emit_log(log).await;
-                }
+            let mut seq = 0;
+            while let Ok(Some(line)) = lines.next_line().await {
+                 let log = knitting_crab_core::LogLine::new(
+                    task_id,
+                    seq,
+                    LogSource::Stdout,
+                    line,
+                );
+                let _ = sink.emit_log(log).await;
+                seq += 1;
             }
         });
     }
@@ -188,26 +181,27 @@ pub async fn spawn(
     if let Some(stderr) = stderr {
         let sink = Arc::clone(&sink_clone);
         tokio::spawn(async move {
-            use std::io::BufRead;
-            let reader = std::io::BufReader::new(stderr);
+            use tokio::io::AsyncBufReadExt;
+            let reader = tokio::io::BufReader::new(stderr);
+            let mut lines = reader.lines();
 
-            for (seq, line_result) in reader.lines().enumerate() {
-                if let Ok(line) = line_result {
-                    let log = knitting_crab_core::LogLine::new(
-                        task_id,
-                        seq as u64,
-                        LogSource::Stderr,
-                        line,
-                    );
-                    let _ = sink.emit_log(log).await;
-                }
+            let mut seq = 0;
+            while let Ok(Some(line)) = lines.next_line().await {
+                 let log = knitting_crab_core::LogLine::new(
+                    task_id,
+                    seq,
+                    LogSource::Stderr,
+                    line,
+                );
+                let _ = sink.emit_log(log).await;
+                seq += 1;
             }
         });
     }
 
     Ok(ProcessHandle {
         task_id,
-        child: Arc::new(Mutex::new(child_std)),
+        child,
         sink: sink_clone,
     })
 }
