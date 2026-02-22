@@ -165,12 +165,7 @@ pub async fn spawn(
 
             let mut seq = 0;
             while let Ok(Some(line)) = lines.next_line().await {
-                 let log = knitting_crab_core::LogLine::new(
-                    task_id,
-                    seq,
-                    LogSource::Stdout,
-                    line,
-                );
+                let log = knitting_crab_core::LogLine::new(task_id, seq, LogSource::Stdout, line);
                 let _ = sink.emit_log(log).await;
                 seq += 1;
             }
@@ -187,12 +182,7 @@ pub async fn spawn(
 
             let mut seq = 0;
             while let Ok(Some(line)) = lines.next_line().await {
-                 let log = knitting_crab_core::LogLine::new(
-                    task_id,
-                    seq,
-                    LogSource::Stderr,
-                    line,
-                );
+                let log = knitting_crab_core::LogLine::new(task_id, seq, LogSource::Stderr, line);
                 let _ = sink.emit_log(log).await;
                 seq += 1;
             }

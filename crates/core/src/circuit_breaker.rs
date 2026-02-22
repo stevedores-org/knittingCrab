@@ -343,7 +343,7 @@ mod tests {
     fn test_half_open_transition() {
         let config = CircuitBreakerConfig {
             failure_threshold: 1,
-            timeout: Duration::from_millis(100), // 100ms timeout
+            timeout: Duration::from_millis(300), // 300ms timeout for stability
             ..Default::default()
         };
         let cb = CircuitBreaker::with_config(config);
@@ -357,7 +357,7 @@ mod tests {
         assert_eq!(cb.state(), CircuitState::Open);
 
         // Should transition to HalfOpen due to timeout
-        std::thread::sleep(Duration::from_millis(60));
+        std::thread::sleep(Duration::from_millis(300));
         assert_eq!(cb.state(), CircuitState::HalfOpen);
     }
 
