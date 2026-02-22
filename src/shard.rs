@@ -43,9 +43,7 @@ impl ShardAggregator {
     /// Returns false if any shard failed or if not all shards have reported.
     #[must_use]
     pub fn overall_success(&self) -> bool {
-        self.results
-            .iter()
-            .all(|r| matches!(r, Some(true)))
+        self.results.iter().all(|r| matches!(r, Some(true)))
     }
 }
 
@@ -101,6 +99,9 @@ mod tests {
         // Only 2 of 4 recorded
 
         assert!(!agg.is_complete());
-        assert!(!agg.overall_success(), "incomplete should be false for success");
+        assert!(
+            !agg.overall_success(),
+            "incomplete should be false for success"
+        );
     }
 }

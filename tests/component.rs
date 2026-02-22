@@ -212,10 +212,7 @@ async fn env_isolation_integration() {
     task.env_allowlist = vec!["PATH".to_string()];
 
     let result = runner.execute(&task).await;
-    assert!(
-        result.success,
-        "task should succeed with PATH in allowlist"
-    );
+    assert!(result.success, "task should succeed with PATH in allowlist");
 
     // Create another task that uses allowlist to only keep PATH
     let mut task2 = WorkItem::new_simple(
@@ -234,7 +231,10 @@ async fn env_isolation_integration() {
     task2.env_allowlist = vec!["PATH".to_string()];
 
     let result2 = runner.execute(&task2).await;
-    assert!(result2.success, "task should succeed with PATH in allowlist");
+    assert!(
+        result2.success,
+        "task should succeed with PATH in allowlist"
+    );
 }
 
 #[tokio::test]
@@ -293,5 +293,8 @@ fn shard_aggregator_end_to_end() {
     agg2.record(2, true);
 
     assert!(agg2.is_complete());
-    assert!(agg2.overall_success(), "overall should pass if all shards pass");
+    assert!(
+        agg2.overall_success(),
+        "overall should pass if all shards pass"
+    );
 }

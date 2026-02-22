@@ -1,12 +1,31 @@
-[package]
-name = "knitting-crab"
+[workspace]
+members = [
+    "crates/core",
+    "crates/worker",
+    "crates/scheduler",
+]
+resolver = "2"
+
+[workspace.package]
 version = "0.1.0"
 edition = "2021"
 
-[dependencies]
+[workspace.dependencies]
+tokio = { version = "1", features = ["full"] }
+thiserror = "1"
+uuid = { version = "1", features = ["v4", "serde"] }
+tracing = "0.1"
+dashmap = "5"
+nix = { version = "0.27", features = ["signal", "process"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+chrono = { version = "0.4", features = ["serde"] }
+async-trait = "0.1"
+proptest = "1"
+tokio-test = "0.4"
+tracing-subscriber = "0.3"
 sha2 = "0.10"
-thiserror = "2"
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync", "process", "io-util"] }
 
-[dev-dependencies]
-tempfile = "3"
+[workspace.lints.rust]
+warnings = "deny"
+unsafe_code = "deny"
