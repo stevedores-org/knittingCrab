@@ -101,7 +101,7 @@ mod tests {
         let registry = NodeRegistry::new();
         let worker_id = WorkerId::new();
         let info = NodeInfo {
-            worker_id: worker_id.clone(),
+            worker_id,
             hostname: "localhost".to_string(),
             capacity: ResourceAllocation::default(),
             registered_at: Utc::now(),
@@ -122,7 +122,7 @@ mod tests {
         let registry = NodeRegistry::new();
         let worker_id = WorkerId::new();
         let info = NodeInfo {
-            worker_id: worker_id.clone(),
+            worker_id,
             hostname: "localhost".to_string(),
             capacity: ResourceAllocation::default(),
             registered_at: Utc::now(),
@@ -132,7 +132,7 @@ mod tests {
         // Manually set last_seen to old time
         registry
             .last_seen
-            .insert(worker_id.clone(), Instant::now() - Duration::from_secs(100));
+            .insert(worker_id, Instant::now() - Duration::from_secs(100));
 
         let stale = registry.stale_nodes(Duration::from_secs(30));
         assert!(stale.contains(&worker_id));
@@ -143,7 +143,7 @@ mod tests {
         let registry = NodeRegistry::new();
         let worker_id = WorkerId::new();
         let info = NodeInfo {
-            worker_id: worker_id.clone(),
+            worker_id,
             hostname: "localhost".to_string(),
             capacity: ResourceAllocation::default(),
             registered_at: Utc::now(),

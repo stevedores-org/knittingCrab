@@ -263,11 +263,11 @@ mod tests {
         let state = CoordinatorState::new();
         let worker_id = WorkerId::new();
         let req = CoordinatorRequest::RegisterNode {
-            worker_id: worker_id.clone(),
+            worker_id,
             hostname: "host1".to_string(),
             capacity: Default::default(),
         };
-        let mut registered = Some(worker_id.clone());
+        let mut registered = Some(worker_id);
         CoordinatorServer::handle_request(&state, req, &mut registered).await;
 
         let req2 = CoordinatorRequest::AnnounceCache {

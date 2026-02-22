@@ -74,7 +74,7 @@ mod tests {
         let cache = CacheIndex::new();
         let worker_id = WorkerId::new();
         let entry = CacheIndexEntry {
-            worker_id: worker_id.clone(),
+            worker_id,
             hostname: "host1".to_string(),
             path: PathBuf::from("/cache/data"),
         };
@@ -96,7 +96,7 @@ mod tests {
         let cache = CacheIndex::new();
         let worker_id = WorkerId::new();
         let entry = CacheIndexEntry {
-            worker_id: worker_id.clone(),
+            worker_id,
             hostname: "host1".to_string(),
             path: PathBuf::from("/cache/data"),
         };
