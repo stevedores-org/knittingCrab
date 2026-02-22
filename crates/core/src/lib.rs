@@ -1,4 +1,5 @@
 pub mod backpressure_integration;
+pub mod circuit_breaker;
 pub mod error;
 pub mod event;
 pub mod event_log;
@@ -13,6 +14,9 @@ pub mod task_timeout;
 pub mod traits;
 
 pub use backpressure_integration::{TaskExecutionFilter, TaskRejectionReason};
+pub use circuit_breaker::{
+    CircuitBreaker, CircuitBreakerConfig, CircuitBreakerStats, CircuitState,
+};
 pub use error::CoreError;
 pub use event::{LogLine, LogSource, TaskEvent};
 pub use event_log::{MemoryEventLog, MultiEventSink, SqliteEventLog};

@@ -322,6 +322,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "chrono",
+ "parking_lot",
  "rusqlite",
  "serde",
  "serde_json",
