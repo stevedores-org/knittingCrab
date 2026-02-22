@@ -31,6 +31,10 @@ pub struct TaskDescriptor {
     /// Defaults to Normal priority if not specified.
     pub priority: Priority,
 
+    /// Task IDs that must complete before this task can run.
+    #[serde(default)]
+    pub dependencies: Vec<TaskId>,
+
     /// Agent intent / human-readable goal (optional).
     pub goal: Option<String>,
 
@@ -134,6 +138,7 @@ mod tests {
             attempt: 0,
             is_critical: false,
             priority: Priority::Normal,
+            dependencies: vec![],
             goal: None,
             budget: None,
             test_gate: None,

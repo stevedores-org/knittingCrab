@@ -132,6 +132,7 @@ mod tests {
             attempt: 0,
             is_critical: false,
             priority: knitting_crab_core::priority::Priority::Normal,
+            dependencies: vec![],
             goal: None,
             budget: Some(AgentBudget {
                 max_tokens,
@@ -152,6 +153,7 @@ mod tests {
             attempt: 0,
             is_critical: false,
             priority: knitting_crab_core::priority::Priority::Normal,
+            dependencies: vec![],
             goal: None,
             budget: None,
             test_gate: None,

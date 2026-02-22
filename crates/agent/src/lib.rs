@@ -66,6 +66,7 @@ impl AgentPlan {
                 attempt: 0,
                 is_critical: false,
                 priority: Priority::Normal,
+                dependencies: vec![],
                 goal: Some(goal.to_string()),
                 budget: None,
                 test_gate: None,

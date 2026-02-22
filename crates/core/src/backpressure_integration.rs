@@ -132,6 +132,7 @@ mod tests {
             attempt: 0,
             is_critical,
             priority,
+            dependencies: vec![],
             goal: None,
             budget: None,
             test_gate: None,
