@@ -198,10 +198,8 @@ impl<
         self.resource_monitor.allocate(&task.resources).await?;
 
         // Guard to ensure resources are released when this scope exits
-        let _resource_guard = ResourceGuard::new(
-            self.resource_monitor.clone(),
-            task.resources.clone(),
-        );
+        let _resource_guard =
+            ResourceGuard::new(self.resource_monitor.clone(), task.resources.clone());
 
         info!("acquiring lease for task {}", task.task_id);
 
