@@ -36,6 +36,8 @@ pub struct FakeWorker {
     logs: Arc<Mutex<Vec<LogLine>>>,
     behaviors: Arc<Mutex<std::collections::HashMap<TaskId, FakeBehavior>>>,
     resource_behavior: Arc<Mutex<ResourceBehavior>>,
+    /// Worker ID: used for per-worker debugging and structured tracing (see #70).
+    /// Useful for understanding multi-worker test scenarios.
     #[allow(dead_code)]
     worker_id: WorkerId,
 }

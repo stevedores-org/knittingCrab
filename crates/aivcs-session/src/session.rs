@@ -41,6 +41,9 @@ impl FromStr for Role {
 }
 
 /// Errors from session operations.
+/// Some variants may not be raised in current implementation but are kept for:
+/// - Comprehensive error handling in future scenarios
+/// - SSH/tmux error cases when RemoteSessionManager is fully implemented (see #77)
 #[derive(Debug, Clone, Error)]
 #[allow(dead_code)]
 pub enum SessionError {

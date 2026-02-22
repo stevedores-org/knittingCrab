@@ -102,6 +102,8 @@ pub struct WorkerRuntime<
     queue: Q,
     lease_store: LS,
     lease_manager: LeaseManager<LS>,
+    /// Resource monitor: kept for Phase 2 resource-aware scheduling.
+    /// Currently stubbed; will enforce CPU/RAM/Metal slot limits during dequeue.
     #[allow(dead_code)]
     resource_monitor: RM,
     event_sink: ES,
