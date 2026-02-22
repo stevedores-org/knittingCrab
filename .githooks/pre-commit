@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# .githooks/pre-commit
+#
+# Runs fast CI checks locally before every commit.
+# Install once with:  git config core.hooksPath .githooks
+#
+set -euo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+cd "$REPO_ROOT"
+
+echo "▶ cargo fmt --check"
+cargo fmt --all -- --check
+
+echo "▶ cargo clippy"
+cargo clippy --all-targets --all-features
+
+echo "▶ cargo test"
+cargo test --all-targets
+
+echo "✓ All pre-commit checks passed."

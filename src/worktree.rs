@@ -125,7 +125,11 @@ mod tests {
                 .create(i, &repo_path, "HEAD")
                 .await
                 .expect("failed to create worktree");
-            assert!(scope.path.exists(), "worktree path {} should exist", scope.path.display());
+            assert!(
+                scope.path.exists(),
+                "worktree path {} should exist",
+                scope.path.display()
+            );
             scopes.push(scope);
         }
 
@@ -300,7 +304,10 @@ mod tests {
         let path = scope.path.clone();
 
         drop(scope);
-        assert!(!path.exists(), "worktree should be removed after first drop");
+        assert!(
+            !path.exists(),
+            "worktree should be removed after first drop"
+        );
 
         // Manually drop again (double-drop) — should not panic
         // This simulates what could happen in unusual error paths
