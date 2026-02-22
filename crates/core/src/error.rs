@@ -22,4 +22,10 @@ pub enum CoreError {
 
     #[error("internal error: {0}")]
     Internal(String),
+
+    #[error("database error: {0}")]
+    DatabaseError(#[from] rusqlite::Error),
+
+    #[error("serialization error: {0}")]
+    SerializationError(#[from] serde_json::Error),
 }
