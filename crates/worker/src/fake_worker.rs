@@ -192,6 +192,7 @@ mod tests {
             resources: ResourceAllocation::default(),
             policy: knitting_crab_core::RetryPolicy::default(),
             attempt: 0,
+            is_critical: false,
         };
 
         worker.enqueue(task.clone());

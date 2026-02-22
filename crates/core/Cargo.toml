@@ -13,6 +13,7 @@ serde_json = { workspace = true }
 chrono = { workspace = true }
 async-trait = { workspace = true }
 rusqlite = { workspace = true }
+anyhow = { workspace = true }
 
 [dev-dependencies]
 tokio-test = { workspace = true }
