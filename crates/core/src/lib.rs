@@ -6,6 +6,7 @@ pub mod lease;
 pub mod persistent_lease;
 pub mod resource;
 pub mod retry;
+pub mod task_timeout;
 pub mod traits;
 
 pub use error::CoreError;
@@ -16,4 +17,5 @@ pub use lease::{Lease, LeaseState};
 pub use persistent_lease::SqliteLeaseStore;
 pub use resource::ResourceAllocation;
 pub use retry::{ExitOutcome, RetryDecision, RetryPolicy};
+pub use task_timeout::{TaskTimeoutManager, TimeoutHandle, TimeoutPolicy, TimeoutStatus};
 pub use traits::{EventSink, LeaseStore, Queue, ResourceMonitor, TaskDescriptor};
