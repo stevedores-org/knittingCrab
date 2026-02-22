@@ -154,14 +154,16 @@ async fn setup_remote_session(
         "runner"
     );
 
-    let cmd = format!(
-        "aivcs-session attach --repo {} --work {} --role runner",
-        repo_name, task_id
-    );
-
-    let output = tokio::process::Command::new("sh")
-        .arg("-c")
-        .arg(&cmd)
+    // Invoke aivcs-session directly without going through a shell to avoid command injection.
+    // Pass each argument as a separate .arg() so that repo_name and task_id are never parsed by a shell.
+    let output = tokio::process::Command::new("aivcs-session")
+        .arg("attach")
+        .arg("--repo")
+        .arg(repo_name)
+        .arg("--work")
+        .arg(task_id.to_string())
+        .arg("--role")
+        .arg("runner")
         .timeout(Duration::from_secs(30))
         .output()
         .await
@@ -174,11 +176,21 @@ async fn setup_remote_session(
 
     // 2. Optional: if git_ref specified, checkout branch/commit in session
     if let Some(git_ref) = git_ref {
-        let cd_cmd = format!(
-            "aivcs-session exec {} 'cd ~/engineering/code/clone-base/{} && git checkout {}'",
-            session_name, repo_name, git_ref
-        );
-        // ... execute cd_cmd ...
+        // Use separate arguments to avoid shell interpretation of git_ref
+        let _output = tokio::process::Command::new("aivcs-session")
+            .arg("exec")
+            .arg(&session_name)
+            .arg("bash")
+            .arg("-c")
+            .arg(format!(
+                "cd ~/engineering/code/clone-base/{} && git checkout {}",
+                shell_escape(repo_name),
+                shell_escape(&git_ref)
+            ))
+            .timeout(Duration::from_secs(30))
+            .output()
+            .await
+            .map_err(|e| format!("git checkout in aivcs-session failed: {}", e))?;
     }
 
     Ok(session_name)

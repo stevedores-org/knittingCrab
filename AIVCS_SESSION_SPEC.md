@@ -674,15 +674,16 @@ async fn dispatch_to_remote_worker(
         repo_name, task_id, "runner"
     );
 
-    // Shell out to aivcs-session
-    let cmd = format!(
-        "aivcs-session attach --repo {} --work {} --role runner",
-        repo_name, task_id
-    );
-
-    tokio::process::Command::new("sh")
-        .arg("-c")
-        .arg(&cmd)
+    // Invoke aivcs-session directly without going through a shell to avoid command injection.
+    // Pass each argument as a separate .arg() so that repo_name and task_id are never parsed by a shell.
+    tokio::process::Command::new("aivcs-session")
+        .arg("attach")
+        .arg("--repo")
+        .arg(repo_name)
+        .arg("--work")
+        .arg(task_id.to_string())
+        .arg("--role")
+        .arg("runner")
         .output()
         .await?;
 

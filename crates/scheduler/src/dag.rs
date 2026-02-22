@@ -222,11 +222,29 @@ impl DagScheduler {
     }
 
     /// Mark a task as completed and unblock its dependents.
+    ///
+    /// Task must be in Running state to transition to Completed.
     pub fn complete(&self, task_id: TaskId) -> Result<(), CoreError> {
         let mut inner = self
             .inner
             .lock()
             .map_err(|e| CoreError::Internal(format!("mutex poisoned: {}", e)))?;
+
+        // Validate state transition: Running -> Completed
+        match inner.states.get(&task_id) {
+            Some(TaskState::Running) => {
+                // Valid transition
+            }
+            Some(state) => {
+                return Err(CoreError::Internal(format!(
+                    "cannot complete task in state {:?}",
+                    state
+                )));
+            }
+            None => {
+                return Err(CoreError::Internal(format!("task {} not found", task_id)));
+            }
+        }
 
         inner.states.insert(task_id, TaskState::Completed);
 
@@ -255,11 +273,30 @@ impl DagScheduler {
     }
 
     /// Mark a task as failed and cascade to dependent tasks.
+    ///
+    /// Task can be failed from Ready (not started), Pending (waiting for deps), or Running states.
+    /// Terminal states (Completed, Failed, DependencyFailed) cannot transition to Failed.
     pub fn fail(&self, task_id: TaskId) -> Result<(), CoreError> {
         let mut inner = self
             .inner
             .lock()
             .map_err(|e| CoreError::Internal(format!("mutex poisoned: {}", e)))?;
+
+        // Validate state transition: only non-terminal states can fail
+        match inner.states.get(&task_id) {
+            Some(TaskState::Running) | Some(TaskState::Ready) | Some(TaskState::Pending) => {
+                // Valid transitions: can fail from any non-terminal state
+            }
+            Some(state) => {
+                return Err(CoreError::Internal(format!(
+                    "cannot fail task in state {:?}",
+                    state
+                )));
+            }
+            None => {
+                return Err(CoreError::Internal(format!("task {} not found", task_id)));
+            }
+        }
 
         inner.states.insert(task_id, TaskState::Failed);
 
@@ -300,7 +337,10 @@ impl Queue for DagScheduler {
             .map_err(|e| CoreError::Internal(format!("mutex poisoned: {}", e)))?;
 
         while let Some(entry) = inner.ready.pop() {
-            // Verify task is still in Ready state (might be stale from heap)
+            // Verify task is still in Ready state (might be stale from heap).
+            // Stale entries occur when tasks are failed/discarded while in the ready heap.
+            // We filter them out here rather than removing them immediately for simplicity,
+            // accepting the trade-off of temporary heap bloat during high-failure scenarios.
             if let Some(TaskState::Ready) = inner.states.get(&entry.task_id) {
                 if let Some(task) = inner.tasks.get(&entry.task_id).cloned() {
                     inner.states.insert(entry.task_id, TaskState::Running);
@@ -322,9 +362,10 @@ impl Queue for DagScheduler {
             task.attempt = attempt;
         }
 
-        // Mark as Ready again if not already in a terminal state
+        // Only allow Running -> Ready transitions (retrying a failed execution)
+        // Pending tasks should not be requeued as they haven't started yet
         if let Some(state) = inner.states.get(&task_id) {
-            if matches!(state, TaskState::Running | TaskState::Pending) {
+            if matches!(state, TaskState::Running) {
                 let priority = inner
                     .tasks
                     .get(&task_id)
@@ -392,15 +433,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn cycle_detection_rejects_plan() {
+    async fn valid_dag_with_diamond_dependencies() {
         let sched = DagScheduler::new();
         let tid_a = TaskId::new();
         let tid_b = TaskId::new();
 
-        // Test: enqueue A, then B depending on A, then try to add C depending on B
-        // where the cycle would be if A depended on C (which it can't since A already exists)
-        // This tests the cycle detection algorithm indirectly.
-        // Enqueue independent tasks: A and B
+        // Build a valid DAG: A and B independent, C depends on A, D depends on both C and B.
+        // This structure has no cycles and should allow all tasks to be enqueued.
         let task_a = make_task(tid_a, vec![], Priority::Normal);
         let task_b = make_task(tid_b, vec![], Priority::Normal);
         let tid_c = TaskId::new();
@@ -414,12 +453,12 @@ mod tests {
             .enqueue(make_task(tid_c, vec![tid_a], Priority::Normal))
             .unwrap();
 
-        // D depends on C and B - no cycle
+        // D depends on C and B (diamond pattern: D waits for two branches that converge)
         sched
             .enqueue(make_task(tid_d, vec![tid_c, tid_b], Priority::Normal))
             .unwrap();
 
-        // Verify all tasks are enqueued
+        // Verify all tasks are enqueued and at least one is ready
         assert!(sched.dequeue(WorkerId::new()).await.unwrap().is_some());
     }
 
@@ -433,6 +472,11 @@ mod tests {
         let result = sched.enqueue(task_a);
         assert!(matches!(result, Err(CoreError::CyclicDependency(_))));
     }
+
+    // NOTE: Multi-node cycles like A → B → A cannot be tested with the current API
+    // because task dependencies are fixed at enqueue time and cannot be modified afterward.
+    // The cycle detection algorithm is nonetheless sound for all possible inputs that can
+    // be constructed through the public API (self-cycles caught here, graph-cycles by detect_cycle).
 
     #[tokio::test]
     async fn diamond_deps_ordering_stable() {
