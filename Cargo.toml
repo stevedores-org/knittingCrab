@@ -1,3 +1,33 @@
+[package]
+name = "knitting_crab"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[[test]]
+name = "component"
+path = "tests/component.rs"
+
+[dependencies]
+tokio = { workspace = true }
+thiserror = { workspace = true }
+uuid = { workspace = true }
+tracing = { workspace = true }
+dashmap = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+async-trait = { workspace = true }
+parking_lot = { workspace = true }
+rusqlite = { workspace = true }
+anyhow = { workspace = true }
+sha2 = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"
+tokio-test = { workspace = true }
+tracing-subscriber = { workspace = true }
+
 [workspace]
 members = [
     "crates/cache",
