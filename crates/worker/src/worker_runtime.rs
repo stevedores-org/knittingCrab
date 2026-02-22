@@ -685,6 +685,7 @@ mod tests {
             attempt: 0,
             is_critical: false,
             priority: knitting_crab_core::Priority::Normal,
+            dependencies: Vec::new(),
         };
 
         // Enqueue task (so FakeWorker can find it during requeue)
