@@ -4,7 +4,7 @@ use std::time::Instant;
 #[derive(Debug, Clone)]
 pub struct ShardConfig {
     pub total_shards: u32,
-    pub shard_index: u32,   // 0-based
+    pub shard_index: u32, // 0-based
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -234,6 +234,7 @@ mod tests {
 
     // Test helper for backward compatibility with existing tests
     impl WorkItem {
+        #[allow(clippy::too_many_arguments)]
         fn new_test(
             id: u64,
             goal: impl Into<String>,
@@ -248,8 +249,17 @@ mod tests {
             max_retries: u32,
         ) -> Self {
             Self::new_simple(
-                id, goal, repo, branch, priority, dependencies,
-                required_cpu_cores, required_ram_mb, requires_gpu, deadline, max_retries,
+                id,
+                goal,
+                repo,
+                branch,
+                priority,
+                dependencies,
+                required_cpu_cores,
+                required_ram_mb,
+                requires_gpu,
+                deadline,
+                max_retries,
             )
         }
     }

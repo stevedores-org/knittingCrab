@@ -65,6 +65,14 @@ impl Default for RepoLockManager {
     }
 }
 
+impl Clone for RepoLockManager {
+    fn clone(&self) -> Self {
+        RepoLockManager {
+            locks: self.locks.clone(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -146,14 +154,5 @@ mod tests {
             "different repos should run in parallel, took {:?}",
             elapsed
         );
-    }
-}
-
-// Allow cloning the manager for easier testing
-impl Clone for RepoLockManager {
-    fn clone(&self) -> Self {
-        RepoLockManager {
-            locks: self.locks.clone(),
-        }
     }
 }
