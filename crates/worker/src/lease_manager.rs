@@ -83,10 +83,7 @@ impl<S: LeaseStore + Clone> LeaseManager<S> {
     }
 
     /// Acquire a lease for a task. Returns error if one already exists.
-    pub async fn acquire(
-        &self,
-        lease: Lease,
-    ) -> Result<(), CoreError> {
+    pub async fn acquire(&self, lease: Lease) -> Result<(), CoreError> {
         self.store.insert(lease).await
     }
 
@@ -221,12 +218,7 @@ mod tests {
         let expired = manager.collect_expired().await.unwrap();
         assert_eq!(expired.len(), 0);
 
-        let lease = manager
-            .store
-            .get(task_id)
-            .await
-            .unwrap()
-            .unwrap();
+        let lease = manager.store.get(task_id).await.unwrap().unwrap();
         assert!(!lease.is_expired());
     }
 }

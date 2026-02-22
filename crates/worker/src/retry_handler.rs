@@ -6,11 +6,7 @@ pub struct RetryHandler;
 
 impl RetryHandler {
     /// Decide whether to retry based on outcome and policy.
-    pub fn decide(
-        outcome: ExitOutcome,
-        policy: &RetryPolicy,
-        attempt: u32,
-    ) -> RetryDecision {
+    pub fn decide(outcome: ExitOutcome, policy: &RetryPolicy, attempt: u32) -> RetryDecision {
         if !outcome.is_retryable(policy) {
             return RetryDecision::Complete;
         }

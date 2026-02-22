@@ -1,6 +1,6 @@
 use std::os::unix::process::{CommandExt, ExitStatusExt};
 use std::path::PathBuf;
-use std::process::{Child as StdChild, Command};
+use std::process::Child as StdChild;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::time::timeout;
@@ -23,8 +23,10 @@ pub struct SpawnParams {
 
 /// Handle to a running process.
 pub struct ProcessHandle {
+    #[allow(dead_code)]
     task_id: TaskId,
     child: Arc<Mutex<StdChild>>,
+    #[allow(dead_code)]
     sink: Arc<dyn EventSink>,
 }
 
@@ -77,17 +79,20 @@ impl ProcessHandle {
         match timeout(grace, wait_result).await {
             Ok(Ok(Ok(status))) => {
                 if status.success() {
-                    return Ok(ExitOutcome::Success);
+                    Ok(ExitOutcome::Success)
                 } else if let Some(code) = status.code() {
-                    return Ok(ExitOutcome::FailedWithCode(code));
+                    Ok(ExitOutcome::FailedWithCode(code))
                 } else if let Some(signal) = status.signal() {
-                    return Ok(ExitOutcome::KilledBySignal(signal));
+                    Ok(ExitOutcome::KilledBySignal(signal))
                 } else {
-                    return Ok(ExitOutcome::FailedWithCode(1));
+                    Ok(ExitOutcome::FailedWithCode(1))
                 }
             }
-            Ok(Ok(Err(e))) => return Err(WorkerError::ProcessError(format!("wait failed: {}", e))),
-            Ok(Err(e)) => return Err(WorkerError::ProcessError(format!("spawn_blocking failed: {}", e))),
+            Ok(Ok(Err(e))) => Err(WorkerError::ProcessError(format!("wait failed: {}", e))),
+            Ok(Err(e)) => Err(WorkerError::ProcessError(format!(
+                "spawn_blocking failed: {}",
+                e
+            ))),
             Err(_) => {
                 // Timeout: send SIGKILL
                 #[cfg(unix)]
@@ -161,22 +166,19 @@ pub async fn spawn(
     // Spawn async stdout reader
     if let Some(stdout) = stdout {
         let sink = Arc::clone(&sink_clone);
-        let task_id = task_id;
         tokio::spawn(async move {
             use std::io::BufRead;
             let reader = std::io::BufReader::new(stdout);
-            let mut seq = 0u64;
 
-            for line_result in reader.lines() {
+            for (seq, line_result) in reader.lines().enumerate() {
                 if let Ok(line) = line_result {
                     let log = knitting_crab_core::LogLine::new(
                         task_id,
-                        seq,
+                        seq as u64,
                         LogSource::Stdout,
                         line,
                     );
                     let _ = sink.emit_log(log).await;
-                    seq += 1;
                 }
             }
         });
@@ -185,22 +187,19 @@ pub async fn spawn(
     // Spawn async stderr reader
     if let Some(stderr) = stderr {
         let sink = Arc::clone(&sink_clone);
-        let task_id = task_id;
         tokio::spawn(async move {
             use std::io::BufRead;
             let reader = std::io::BufReader::new(stderr);
-            let mut seq = 0u64;
 
-            for line_result in reader.lines() {
+            for (seq, line_result) in reader.lines().enumerate() {
                 if let Ok(line) = line_result {
                     let log = knitting_crab_core::LogLine::new(
                         task_id,
-                        seq,
+                        seq as u64,
                         LogSource::Stderr,
                         line,
                     );
                     let _ = sink.emit_log(log).await;
-                    seq += 1;
                 }
             }
         });
@@ -225,11 +224,17 @@ mod tests {
 
     #[async_trait]
     impl EventSink for TestSink {
-        async fn emit_event(&self, _event: knitting_crab_core::TaskEvent) -> Result<(), knitting_crab_core::CoreError> {
+        async fn emit_event(
+            &self,
+            _event: knitting_crab_core::TaskEvent,
+        ) -> Result<(), knitting_crab_core::CoreError> {
             Ok(())
         }
 
-        async fn emit_log(&self, log: knitting_crab_core::LogLine) -> Result<(), knitting_crab_core::CoreError> {
+        async fn emit_log(
+            &self,
+            log: knitting_crab_core::LogLine,
+        ) -> Result<(), knitting_crab_core::CoreError> {
             self.logs.lock().unwrap().push(log);
             Ok(())
         }

@@ -20,9 +20,10 @@ impl StubScheduler {
 
     /// Add a task to the queue.
     pub fn enqueue(&self, task: TaskDescriptor) -> Result<(), CoreError> {
-        let mut q = self.queue.lock().map_err(|e| {
-            CoreError::Internal(format!("queue lock poisoned: {}", e))
-        })?;
+        let mut q = self
+            .queue
+            .lock()
+            .map_err(|e| CoreError::Internal(format!("queue lock poisoned: {}", e)))?;
         q.push_back(task);
         Ok(())
     }
@@ -37,16 +38,18 @@ impl Default for StubScheduler {
 #[async_trait]
 impl Queue for StubScheduler {
     async fn dequeue(&self, _worker_id: WorkerId) -> Result<Option<TaskDescriptor>, CoreError> {
-        let mut q = self.queue.lock().map_err(|e| {
-            CoreError::Internal(format!("queue lock poisoned: {}", e))
-        })?;
+        let mut q = self
+            .queue
+            .lock()
+            .map_err(|e| CoreError::Internal(format!("queue lock poisoned: {}", e)))?;
         Ok(q.pop_front())
     }
 
     async fn requeue(&self, task_id: TaskId, attempt: u32) -> Result<(), CoreError> {
-        let mut q = self.queue.lock().map_err(|e| {
-            CoreError::Internal(format!("queue lock poisoned: {}", e))
-        })?;
+        let mut q = self
+            .queue
+            .lock()
+            .map_err(|e| CoreError::Internal(format!("queue lock poisoned: {}", e)))?;
 
         // Find and update the task (stub: just push back with new attempt)
         for task in q.iter_mut() {

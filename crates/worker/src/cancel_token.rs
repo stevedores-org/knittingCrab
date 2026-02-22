@@ -87,11 +87,7 @@ mod tests {
         tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
         token.cancel();
 
-        let result = tokio::time::timeout(
-            tokio::time::Duration::from_secs(1),
-            handle,
-        )
-        .await;
+        let result = tokio::time::timeout(tokio::time::Duration::from_secs(1), handle).await;
         assert!(result.is_ok());
         assert_eq!(result.unwrap().unwrap(), "cancelled");
     }

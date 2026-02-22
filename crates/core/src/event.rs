@@ -44,10 +44,7 @@ pub enum TaskEvent {
     },
 
     /// Task execution started.
-    Started {
-        task_id: TaskId,
-        pid: u32,
-    },
+    Started { task_id: TaskId, pid: u32 },
 
     /// Task execution completed.
     Completed {
@@ -56,9 +53,7 @@ pub enum TaskEvent {
     },
 
     /// Task was cancelled.
-    Cancelled {
-        task_id: TaskId,
-    },
+    Cancelled { task_id: TaskId },
 
     /// Task will be retried.
     WillRetry {
@@ -68,15 +63,10 @@ pub enum TaskEvent {
     },
 
     /// Task has been abandoned (no more retries).
-    Abandoned {
-        task_id: TaskId,
-        reason: String,
-    },
+    Abandoned { task_id: TaskId, reason: String },
 
     /// Lease expired.
-    LeaseExpired {
-        task_id: TaskId,
-    },
+    LeaseExpired { task_id: TaskId },
 }
 
 #[cfg(test)]

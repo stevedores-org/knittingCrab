@@ -52,11 +52,18 @@ impl ProcessExecutor for RealProcessExecutor {
 }
 
 /// Main worker runtime orchestrating task execution.
-pub struct WorkerRuntime<Q: Queue, LS: LeaseStore + Clone, RM: ResourceMonitor, ES: EventSink + Clone, PE: ProcessExecutor> {
+pub struct WorkerRuntime<
+    Q: Queue,
+    LS: LeaseStore + Clone,
+    RM: ResourceMonitor,
+    ES: EventSink + Clone,
+    PE: ProcessExecutor,
+> {
     worker_id: WorkerId,
     queue: Q,
     lease_store: LS,
     lease_manager: LeaseManager<LS>,
+    #[allow(dead_code)]
     resource_monitor: RM,
     event_sink: ES,
     process_executor: PE,
@@ -65,8 +72,13 @@ pub struct WorkerRuntime<Q: Queue, LS: LeaseStore + Clone, RM: ResourceMonitor, 
     reaper_interval_ms: u64,
 }
 
-impl<Q: Queue, LS: LeaseStore + Clone, RM: ResourceMonitor, ES: EventSink + Clone, PE: ProcessExecutor>
-    WorkerRuntime<Q, LS, RM, ES, PE>
+impl<
+        Q: Queue,
+        LS: LeaseStore + Clone,
+        RM: ResourceMonitor,
+        ES: EventSink + Clone,
+        PE: ProcessExecutor,
+    > WorkerRuntime<Q, LS, RM, ES, PE>
 {
     pub fn new(
         worker_id: WorkerId,
@@ -127,7 +139,10 @@ impl<Q: Queue, LS: LeaseStore + Clone, RM: ResourceMonitor, ES: EventSink + Clon
     }
 
     /// Execute a single task with retry logic.
-    async fn execute_task(&self, task: &knitting_crab_core::TaskDescriptor) -> Result<(), WorkerError> {
+    async fn execute_task(
+        &self,
+        task: &knitting_crab_core::TaskDescriptor,
+    ) -> Result<(), WorkerError> {
         info!("acquiring lease for task {}", task.task_id);
 
         let lease = Lease::new(task.task_id, self.worker_id, self.lease_ttl, task.attempt);
@@ -142,7 +157,7 @@ impl<Q: Queue, LS: LeaseStore + Clone, RM: ResourceMonitor, ES: EventSink + Clon
             .await?;
 
         let (cancel_token, cancel_guard) = CancelToken::new();
-        let cancel_token = Arc::new(cancel_token);
+        let _cancel_token = Arc::new(cancel_token);
 
         // Spawn heartbeat task
         let lease_manager = self.lease_manager.clone();
@@ -154,11 +169,12 @@ impl<Q: Queue, LS: LeaseStore + Clone, RM: ResourceMonitor, ES: EventSink + Clon
             let mut ticker = interval(Duration::from_millis(heartbeat_interval));
             loop {
                 ticker.tick().await;
-                match lease_store.get(heartbeat_task_id).await {
-                    Ok(None) => break,
-                    _ => {}
+                if let Ok(None) = lease_store.get(heartbeat_task_id).await {
+                    break;
                 }
-                let _ = lease_manager.renew(heartbeat_task_id, Duration::from_secs(30)).await;
+                let _ = lease_manager
+                    .renew(heartbeat_task_id, Duration::from_secs(30))
+                    .await;
             }
         });
 
@@ -171,7 +187,11 @@ impl<Q: Queue, LS: LeaseStore + Clone, RM: ResourceMonitor, ES: EventSink + Clon
 
         let outcome = self
             .process_executor
-            .execute(spawn_params, Arc::new(self.event_sink.clone()), cancel_guard)
+            .execute(
+                spawn_params,
+                Arc::new(self.event_sink.clone()),
+                cancel_guard,
+            )
             .await?;
 
         heartbeat_handle.abort();
@@ -198,7 +218,9 @@ impl<Q: Queue, LS: LeaseStore + Clone, RM: ResourceMonitor, ES: EventSink + Clon
                     })
                     .await?;
 
-                self.lease_manager.fail(task.task_id, task.attempt + 1).await?;
+                self.lease_manager
+                    .fail(task.task_id, task.attempt + 1)
+                    .await?;
                 sleep(delay).await;
                 self.queue.requeue(task.task_id, task.attempt + 1).await?;
             }
@@ -246,8 +268,11 @@ impl<Q: Queue, LS: LeaseStore + Clone, RM: ResourceMonitor, ES: EventSink + Clon
     }
 
     /// Cancel a task in progress.
-    pub async fn cancel_task(&self, task_id: knitting_crab_core::ids::TaskId) -> Result<(), WorkerError> {
-        if let Some(lease) = self.lease_store.get(task_id).await? {
+    pub async fn cancel_task(
+        &self,
+        task_id: knitting_crab_core::ids::TaskId,
+    ) -> Result<(), WorkerError> {
+        if self.lease_store.get(task_id).await?.is_some() {
             self.lease_manager.cancel(task_id).await?;
             self.event_sink
                 .emit_event(TaskEvent::Cancelled { task_id })
@@ -259,12 +284,11 @@ impl<Q: Queue, LS: LeaseStore + Clone, RM: ResourceMonitor, ES: EventSink + Clon
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lease_manager::InMemoryLeaseStore;
     use crate::fake_worker::FakeWorker;
+    use crate::lease_manager::InMemoryLeaseStore;
     use knitting_crab_core::resource::ResourceAllocation;
     use knitting_crab_core::retry::RetryPolicy;
     use std::path::PathBuf;
@@ -305,5 +329,4 @@ mod tests {
             _ => panic!("task not found"),
         }
     }
-
 }

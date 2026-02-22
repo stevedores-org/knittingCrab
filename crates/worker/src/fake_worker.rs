@@ -29,6 +29,7 @@ pub struct FakeWorker {
     events: Arc<Mutex<Vec<TaskEvent>>>,
     logs: Arc<Mutex<Vec<LogLine>>>,
     behaviors: Arc<Mutex<std::collections::HashMap<TaskId, FakeBehavior>>>,
+    #[allow(dead_code)]
     worker_id: WorkerId,
 }
 
@@ -126,7 +127,6 @@ impl EventSink for FakeWorker {
     }
 }
 
-
 /// Fake process executor for testing.
 #[async_trait]
 impl crate::worker_runtime::ProcessExecutor for FakeWorker {
@@ -140,9 +140,9 @@ impl crate::worker_runtime::ProcessExecutor for FakeWorker {
             return Ok(ExitOutcome::Success);
         }
 
-        let behavior = self.get_behavior(params.task_id).unwrap_or(FakeBehavior::Succeed {
-            delay_ms: 10,
-        });
+        let behavior = self
+            .get_behavior(params.task_id)
+            .unwrap_or(FakeBehavior::Succeed { delay_ms: 10 });
 
         match behavior {
             FakeBehavior::Succeed { delay_ms } => {
@@ -172,9 +172,7 @@ impl crate::worker_runtime::ProcessExecutor for FakeWorker {
                 cancel_guard.cancelled().await;
                 Ok(ExitOutcome::KilledBySignal(15))
             }
-            FakeBehavior::Crash => {
-                Ok(ExitOutcome::FailedWithCode(1))
-            }
+            FakeBehavior::Crash => Ok(ExitOutcome::FailedWithCode(1)),
         }
     }
 }
