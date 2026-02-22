@@ -66,6 +66,7 @@ impl LeaseStore for InMemoryLeaseStore {
         Ok(self
             .leases
             .iter()
+            .filter(|entry| entry.value().state == knitting_crab_core::lease::LeaseState::Active)
             .map(|entry| entry.value().clone())
             .collect())
     }
@@ -106,10 +107,16 @@ impl<S: LeaseStore + Clone> LeaseManager<S> {
 
         for lease in leases {
             if lease.is_expired() {
-                let mut expired_lease = lease.clone();
-                expired_lease.state = knitting_crab_core::LeaseState::Expired;
-                self.store.update(expired_lease.clone()).await?;
-                expired.push(expired_lease);
+                // Double check: fetch fresh copy to prevent race condition
+                if let Some(mut current) = self.store.get(lease.task_id).await? {
+                    if current.state == knitting_crab_core::LeaseState::Active
+                        && current.is_expired()
+                    {
+                        current.state = knitting_crab_core::LeaseState::Expired;
+                        self.store.update(current.clone()).await?;
+                        expired.push(current);
+                    }
+                }
             }
         }
 
