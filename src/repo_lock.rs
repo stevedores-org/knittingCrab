@@ -65,6 +65,7 @@ impl Default for RepoLockManager {
     }
 }
 
+// Allow cloning the manager for easier testing
 impl Clone for RepoLockManager {
     fn clone(&self) -> Self {
         RepoLockManager {
