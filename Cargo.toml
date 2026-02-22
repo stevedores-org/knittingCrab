@@ -37,7 +37,7 @@ members = [
     "crates/transport",
     "crates/coordinator",
     "crates/node",
-    "crates/aivcs-session",
+    "crates/aivcs-session", "crates/agent",
 ]
 resolver = "2"
 

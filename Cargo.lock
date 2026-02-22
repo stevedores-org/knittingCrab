@@ -479,6 +479,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "knitting-crab-agent"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "dashmap",
+ "knitting-crab-core",
+ "tokio",
+]
+
+[[package]]
 name = "knitting-crab-cache"
 version = "0.1.0"
 dependencies = [

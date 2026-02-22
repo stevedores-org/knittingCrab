@@ -1,0 +1,13 @@
+[package]
+name = "knitting-crab-agent"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+knitting-crab-core = { path = "../core" }
+async-trait = { workspace = true }
+dashmap = { workspace = true }
+tokio = { workspace = true }
+
+[lints]
+workspace = true
