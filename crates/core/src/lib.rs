@@ -1,3 +1,4 @@
+pub mod circuit_breaker;
 pub mod error;
 pub mod event;
 pub mod heartbeat;
@@ -7,6 +8,9 @@ pub mod resource;
 pub mod retry;
 pub mod traits;
 
+pub use circuit_breaker::{
+    CircuitBreaker, CircuitBreakerConfig, CircuitBreakerStats, CircuitState,
+};
 pub use error::CoreError;
 pub use event::{LogLine, LogSource, TaskEvent};
 pub use heartbeat::HeartbeatRecord;
