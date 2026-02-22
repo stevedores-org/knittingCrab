@@ -234,6 +234,7 @@ mod tests {
 
     // Test helper for backward compatibility with existing tests
     impl WorkItem {
+        #[allow(clippy::too_many_arguments)]
         fn new_test(
             id: u64,
             goal: impl Into<String>,

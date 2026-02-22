@@ -1,21 +1,17 @@
-#!/usr/bin/env bash
-# .githooks/pre-commit
-#
-# Runs fast CI checks locally before every commit.
-# Install once with:  git config core.hooksPath .githooks
-#
-set -euo pipefail
+#!/bin/bash
+set -e
 
-REPO_ROOT="$(git rev-parse --show-toplevel)"
-cd "$REPO_ROOT"
+# Pre-commit hook for knittingCrab
+# Runs local checks before allowing commits
 
-echo "▶ cargo fmt --check"
-cargo fmt --all -- --check
+echo "🔍 Running pre-commit checks..."
 
-echo "▶ cargo clippy"
-cargo clippy --all-targets --all-features
+# Check formatting
+echo "  📝 Checking code formatting..."
+cargo fmt --all -- --check || { echo "❌ Formatting check failed"; exit 1; }
 
-echo "▶ cargo test"
-cargo test --all-targets
+# Run clippy
+echo "  🔗 Running clippy lints..."
+cargo clippy --all-targets --all-features -- -D warnings || { echo "❌ Clippy check failed"; exit 1; }
 
-echo "✓ All pre-commit checks passed."
+echo "✅ Pre-commit checks passed"

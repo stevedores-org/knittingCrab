@@ -90,13 +90,13 @@ mod tests {
             .unwrap();
 
         Command::new("git")
-            .args(&["config", "user.email", "test@example.com"])
+            .args(["config", "user.email", "test@example.com"])
             .current_dir(&repo_path)
             .output()
             .unwrap();
 
         Command::new("git")
-            .args(&["config", "user.name", "Test User"])
+            .args(["config", "user.name", "Test User"])
             .current_dir(&repo_path)
             .output()
             .unwrap();
@@ -111,7 +111,7 @@ mod tests {
             .unwrap();
 
         Command::new("git")
-            .args(&["commit", "-m", "initial"])
+            .args(["commit", "-m", "initial"])
             .current_dir(&repo_path)
             .output()
             .unwrap();
@@ -157,13 +157,13 @@ mod tests {
             .unwrap();
 
         Command::new("git")
-            .args(&["config", "user.email", "test@example.com"])
+            .args(["config", "user.email", "test@example.com"])
             .current_dir(&repo_path)
             .output()
             .unwrap();
 
         Command::new("git")
-            .args(&["config", "user.name", "Test User"])
+            .args(["config", "user.name", "Test User"])
             .current_dir(&repo_path)
             .output()
             .unwrap();
@@ -178,7 +178,7 @@ mod tests {
             .unwrap();
 
         Command::new("git")
-            .args(&["commit", "-m", "initial"])
+            .args(["commit", "-m", "initial"])
             .current_dir(&repo_path)
             .output()
             .unwrap();
@@ -213,13 +213,13 @@ mod tests {
             .unwrap();
 
         Command::new("git")
-            .args(&["config", "user.email", "test@example.com"])
+            .args(["config", "user.email", "test@example.com"])
             .current_dir(&repo_path)
             .output()
             .unwrap();
 
         Command::new("git")
-            .args(&["config", "user.name", "Test User"])
+            .args(["config", "user.name", "Test User"])
             .current_dir(&repo_path)
             .output()
             .unwrap();
@@ -234,7 +234,7 @@ mod tests {
             .unwrap();
 
         Command::new("git")
-            .args(&["commit", "-m", "initial"])
+            .args(["commit", "-m", "initial"])
             .current_dir(&repo_path)
             .output()
             .unwrap();
@@ -269,13 +269,13 @@ mod tests {
             .unwrap();
 
         Command::new("git")
-            .args(&["config", "user.email", "test@example.com"])
+            .args(["config", "user.email", "test@example.com"])
             .current_dir(&repo_path)
             .output()
             .unwrap();
 
         Command::new("git")
-            .args(&["config", "user.name", "Test User"])
+            .args(["config", "user.name", "Test User"])
             .current_dir(&repo_path)
             .output()
             .unwrap();
@@ -290,7 +290,7 @@ mod tests {
             .unwrap();
 
         Command::new("git")
-            .args(&["commit", "-m", "initial"])
+            .args(["commit", "-m", "initial"])
             .current_dir(&repo_path)
             .output()
             .unwrap();
