@@ -1,11 +1,12 @@
 use async_trait::async_trait;
+use dashmap::DashMap;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::{interval, sleep};
 use tracing::{debug, error, info};
 
 use knitting_crab_core::event::TaskEvent;
-use knitting_crab_core::ids::WorkerId;
+use knitting_crab_core::ids::{TaskId, WorkerId};
 use knitting_crab_core::lease::Lease;
 use knitting_crab_core::retry::ExitOutcome;
 use knitting_crab_core::traits::{EventSink, LeaseStore, Queue, ResourceMonitor};
@@ -51,6 +52,17 @@ impl ProcessExecutor for RealProcessExecutor {
     }
 }
 
+struct ActiveTaskGuard {
+    task_id: TaskId,
+    active_tasks: Arc<DashMap<TaskId, CancelToken>>,
+}
+
+impl Drop for ActiveTaskGuard {
+    fn drop(&mut self) {
+        self.active_tasks.remove(&self.task_id);
+    }
+}
+
 /// Main worker runtime orchestrating task execution.
 pub struct WorkerRuntime<
     Q: Queue,
@@ -67,6 +79,7 @@ pub struct WorkerRuntime<
     resource_monitor: RM,
     event_sink: ES,
     process_executor: PE,
+    active_tasks: Arc<DashMap<TaskId, CancelToken>>,
     lease_ttl: Duration,
     heartbeat_interval_ms: u64,
     reaper_interval_ms: u64,
@@ -97,6 +110,7 @@ impl<
             resource_monitor,
             event_sink,
             process_executor,
+            active_tasks: Arc::new(DashMap::new()),
             lease_ttl: Duration::from_secs(30),
             heartbeat_interval_ms: 5000,
             reaper_interval_ms: 10000,
@@ -157,7 +171,13 @@ impl<
             .await?;
 
         let (cancel_token, cancel_guard) = CancelToken::new();
-        let _cancel_token = Arc::new(cancel_token);
+        self.active_tasks.insert(task.task_id, cancel_token);
+
+        // Ensure token is removed when this function exits (even on panic)
+        let _guard = ActiveTaskGuard {
+            task_id: task.task_id,
+            active_tasks: self.active_tasks.clone(),
+        };
 
         // Spawn heartbeat task
         let lease_manager = self.lease_manager.clone();
@@ -272,6 +292,11 @@ impl<
         &self,
         task_id: knitting_crab_core::ids::TaskId,
     ) -> Result<(), WorkerError> {
+        // Trigger cancellation if active locally
+        if let Some(token) = self.active_tasks.get(&task_id) {
+            token.cancel();
+        }
+
         if self.lease_store.get(task_id).await?.is_some() {
             self.lease_manager.cancel(task_id).await?;
             self.event_sink
