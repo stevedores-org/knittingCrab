@@ -59,7 +59,7 @@ pub enum CoordinatorRequest {
 #[serde(tag = "type", content = "payload")]
 pub enum CoordinatorResponse {
     Ok,
-    Dequeued(Option<TaskDescriptor>),
+    Dequeued(Box<Option<TaskDescriptor>>),
     Lease(Option<Lease>),
     Leases(Vec<Lease>),
     CacheLocations(Vec<CacheLocation>),

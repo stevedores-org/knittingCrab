@@ -2,6 +2,7 @@ use async_trait::async_trait;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+use crate::agent::{AgentBudget, TestGate};
 use crate::error::CoreError;
 use crate::event::{LogLine, TaskEvent};
 use crate::ids::{TaskId, WorkerId};
@@ -29,6 +30,15 @@ pub struct TaskDescriptor {
     /// Determines queue placement and round-robin scheduling order.
     /// Defaults to Normal priority if not specified.
     pub priority: Priority,
+
+    /// Agent intent / human-readable goal (optional).
+    pub goal: Option<String>,
+
+    /// Budget constraints for token consumption and time (optional).
+    pub budget: Option<AgentBudget>,
+
+    /// Test gate that must pass before task completes (optional).
+    pub test_gate: Option<TestGate>,
 }
 
 /// A queue that stores and distributes tasks to workers.
@@ -86,6 +96,27 @@ pub trait EventSink: Send + Sync + 'static {
     async fn emit_log(&self, log: LogLine) -> Result<(), CoreError>;
 }
 
+/// Storage and management of goal locks (prevents duplicate agent work).
+#[async_trait]
+pub trait GoalLockStore: Send + Sync + 'static {
+    /// Attempt to acquire a lock for a goal.
+    ///
+    /// Returns `Ok(())` if acquired. Returns `Err(CoreError::GoalLockConflict)`
+    /// if another task already holds the lock for this goal.
+    async fn try_acquire(&self, goal: &str, task_id: TaskId) -> Result<(), CoreError>;
+
+    /// Release a lock for a goal.
+    ///
+    /// Only releases if the task_id matches the current holder.
+    /// Returns `Ok(())` if released, or if the lock is free (no-op on foreign release).
+    async fn release(&self, goal: &str, task_id: TaskId) -> Result<(), CoreError>;
+
+    /// Get the current holder of a goal lock.
+    ///
+    /// Returns `None` if the goal is not locked.
+    async fn holder(&self, goal: &str) -> Result<Option<TaskId>, CoreError>;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -103,6 +134,9 @@ mod tests {
             attempt: 0,
             is_critical: false,
             priority: Priority::Normal,
+            goal: None,
+            budget: None,
+            test_gate: None,
         };
 
         assert_eq!(desc.task_id, task_id);
@@ -124,6 +158,9 @@ mod tests {
             attempt: 0,
             is_critical: true,
             priority: Priority::Critical,
+            goal: None,
+            budget: None,
+            test_gate: None,
         };
 
         assert!(desc.is_critical);

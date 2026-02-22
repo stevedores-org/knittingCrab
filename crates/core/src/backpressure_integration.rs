@@ -132,6 +132,9 @@ mod tests {
             attempt: 0,
             is_critical,
             priority,
+            goal: None,
+            budget: None,
+            test_gate: None,
         }
     }
 

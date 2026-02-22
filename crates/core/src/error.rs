@@ -28,4 +28,13 @@ pub enum CoreError {
 
     #[error("serialization error: {0}")]
     SerializationError(#[from] serde_json::Error),
+
+    #[error("agent budget exceeded: {reason}")]
+    BudgetExceeded { reason: String },
+
+    #[error("test gate failed with exit code {exit_code}")]
+    TestGateFailed { exit_code: i32 },
+
+    #[error("goal lock conflict: goal '{goal}' already held by another task")]
+    GoalLockConflict { goal: String },
 }

@@ -1,3 +1,4 @@
+pub mod agent;
 pub mod backpressure_integration;
 pub mod circuit_breaker;
 pub mod error;
@@ -17,6 +18,7 @@ pub mod task_timeout;
 pub mod time_slice_scheduler;
 pub mod traits;
 
+pub use agent::{AgentBudget, TestGate};
 pub use backpressure_integration::{TaskExecutionFilter, TaskRejectionReason};
 pub use circuit_breaker::{
     CircuitBreaker, CircuitBreakerConfig, CircuitBreakerStats, CircuitState,
@@ -38,4 +40,4 @@ pub use resource::ResourceAllocation;
 pub use retry::{ExitOutcome, RetryDecision, RetryPolicy};
 pub use task_timeout::{TaskTimeoutManager, TimeoutHandle, TimeoutPolicy, TimeoutStatus};
 pub use time_slice_scheduler::{SchedulerState, SchedulerStats, TimeSliceScheduler};
-pub use traits::{EventSink, LeaseStore, Queue, ResourceMonitor, TaskDescriptor};
+pub use traits::{EventSink, GoalLockStore, LeaseStore, Queue, ResourceMonitor, TaskDescriptor};

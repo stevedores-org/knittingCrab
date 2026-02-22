@@ -67,6 +67,21 @@ pub enum TaskEvent {
 
     /// Lease expired.
     LeaseExpired { task_id: TaskId },
+
+    /// Agent goal lock was acquired.
+    GoalLockAcquired { task_id: TaskId, goal: String },
+
+    /// Agent goal lock was released.
+    GoalLockReleased { task_id: TaskId, goal: String },
+
+    /// Agent task budget was exceeded.
+    BudgetExceeded { task_id: TaskId, reason: String },
+
+    /// Test gate passed.
+    TestGatePassed { task_id: TaskId },
+
+    /// Test gate failed.
+    TestGateFailed { task_id: TaskId, exit_code: i32 },
 }
 
 #[cfg(test)]

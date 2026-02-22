@@ -66,6 +66,11 @@ impl MemoryEventLog {
                 TaskEvent::WillRetry { task_id: tid, .. } => tid == &task_id,
                 TaskEvent::Abandoned { task_id: tid, .. } => tid == &task_id,
                 TaskEvent::LeaseExpired { task_id: tid } => tid == &task_id,
+                TaskEvent::GoalLockAcquired { task_id: tid, .. } => tid == &task_id,
+                TaskEvent::GoalLockReleased { task_id: tid, .. } => tid == &task_id,
+                TaskEvent::BudgetExceeded { task_id: tid, .. } => tid == &task_id,
+                TaskEvent::TestGatePassed { task_id: tid } => tid == &task_id,
+                TaskEvent::TestGateFailed { task_id: tid, .. } => tid == &task_id,
             })
             .map(|(_, e)| e.clone())
             .collect()
@@ -205,6 +210,11 @@ impl EventSink for SqliteEventLog {
             TaskEvent::WillRetry { task_id, .. } => task_id,
             TaskEvent::Abandoned { task_id, .. } => task_id,
             TaskEvent::LeaseExpired { task_id } => task_id,
+            TaskEvent::GoalLockAcquired { task_id, .. } => task_id,
+            TaskEvent::GoalLockReleased { task_id, .. } => task_id,
+            TaskEvent::BudgetExceeded { task_id, .. } => task_id,
+            TaskEvent::TestGatePassed { task_id } => task_id,
+            TaskEvent::TestGateFailed { task_id, .. } => task_id,
         };
 
         let event_type = match &event {
@@ -215,6 +225,11 @@ impl EventSink for SqliteEventLog {
             TaskEvent::WillRetry { .. } => "WillRetry",
             TaskEvent::Abandoned { .. } => "Abandoned",
             TaskEvent::LeaseExpired { .. } => "LeaseExpired",
+            TaskEvent::GoalLockAcquired { .. } => "GoalLockAcquired",
+            TaskEvent::GoalLockReleased { .. } => "GoalLockReleased",
+            TaskEvent::BudgetExceeded { .. } => "BudgetExceeded",
+            TaskEvent::TestGatePassed { .. } => "TestGatePassed",
+            TaskEvent::TestGateFailed { .. } => "TestGateFailed",
         };
 
         let event_data = serde_json::to_string(&event)?;

@@ -91,6 +91,9 @@ mod tests {
             attempt: 0,
             is_critical: false,
             priority: knitting_crab_core::Priority::Normal,
+            goal: None,
+            budget: None,
+            test_gate: None,
         };
 
         scheduler.enqueue(task.clone()).unwrap();
