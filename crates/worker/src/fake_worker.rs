@@ -193,6 +193,7 @@ mod tests {
             policy: knitting_crab_core::RetryPolicy::default(),
             attempt: 0,
             is_critical: false,
+            priority: knitting_crab_core::Priority::Normal,
         };
 
         worker.enqueue(task.clone());
