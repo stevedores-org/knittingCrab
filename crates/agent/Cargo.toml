@@ -3,6 +3,8 @@ name = "knitting-crab-agent"
 version.workspace = true
 edition.workspace = true
 
+[lib]
+
 [dependencies]
 knitting-crab-core = { path = "../core" }
 async-trait = { workspace = true }
