@@ -1,3 +1,4 @@
+pub mod artifact_index;
 pub mod cache;
 pub mod cache_key;
 pub mod dag;
@@ -13,6 +14,7 @@ pub mod work_item;
 pub mod worker;
 pub mod worktree;
 
+pub use artifact_index::{ArtifactIndex, ArtifactMetadata, ArtifactType, RetentionPolicy};
 pub use cache::ArtifactCache;
 pub use cache_key::CacheKeyBuilder;
 pub use dag::DagEngine;
