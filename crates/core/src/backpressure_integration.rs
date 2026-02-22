@@ -116,6 +116,12 @@ mod tests {
 
     /// Helper to create a test task with default values.
     fn make_test_task(is_critical: bool) -> TaskDescriptor {
+        let priority = if is_critical {
+            crate::priority::Priority::Critical
+        } else {
+            crate::priority::Priority::Normal
+        };
+
         TaskDescriptor {
             task_id: crate::ids::TaskId::new(),
             command: vec!["echo".to_string()],
@@ -125,6 +131,7 @@ mod tests {
             policy: crate::retry::RetryPolicy::default(),
             attempt: 0,
             is_critical,
+            priority,
         }
     }
 

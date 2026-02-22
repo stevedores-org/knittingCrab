@@ -5,6 +5,8 @@ pub mod heartbeat;
 pub mod ids;
 pub mod lease;
 pub mod persistent_lease;
+pub mod priority;
+pub mod priority_queue;
 pub mod queue_backpressure;
 pub mod resource;
 pub mod retry;
@@ -18,6 +20,8 @@ pub use heartbeat::HeartbeatRecord;
 pub use ids::{LeaseId, TaskId, WorkerId};
 pub use lease::{Lease, LeaseState};
 pub use persistent_lease::SqliteLeaseStore;
+pub use priority::Priority;
+pub use priority_queue::{PriorityQueueManager, PriorityQueueStats};
 pub use queue_backpressure::{
     BackpressureConfig, DegradationMode, QueueBackpressureManager, QueueStats,
 };
