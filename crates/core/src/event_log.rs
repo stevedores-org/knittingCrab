@@ -68,13 +68,18 @@ impl MemoryEventLog {
     }
 
     /// Clear all events (for testing).
+    ///
+    /// On poisoned locks, recovers the inner data and clears it anyway —
+    /// consistent with the reader methods that also recover from poisoning.
     pub fn clear(&self) {
-        if let Ok(mut events) = self.events.write() {
-            events.clear();
-        }
-        if let Ok(mut logs) = self.logs.write() {
-            logs.clear();
-        }
+        self.events
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .clear();
+        self.logs
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .clear();
     }
 }
 
