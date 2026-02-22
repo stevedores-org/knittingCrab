@@ -1,6 +1,7 @@
 pub mod cache;
 pub mod dag;
 pub mod error;
+pub mod heartbeat;
 pub mod lease;
 pub mod policy;
 pub mod repo_lock;
@@ -15,6 +16,7 @@ pub mod worktree;
 pub use cache::ArtifactCache;
 pub use dag::DagEngine;
 pub use error::SchedulerError;
+pub use heartbeat::HeartbeatMonitor;
 pub use lease::{Lease, LeaseManager};
 pub use policy::{BackoffStrategy, Budget};
 pub use repo_lock::RepoLockManager;
