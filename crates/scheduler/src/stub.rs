@@ -89,6 +89,7 @@ mod tests {
             resources: ResourceAllocation::default(),
             policy: RetryPolicy::default(),
             attempt: 0,
+            is_critical: false,
         };
 
         scheduler.enqueue(task.clone()).unwrap();

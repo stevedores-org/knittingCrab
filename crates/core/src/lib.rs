@@ -1,3 +1,4 @@
+pub mod backpressure_integration;
 pub mod error;
 pub mod event;
 pub mod heartbeat;
@@ -8,6 +9,7 @@ pub mod resource;
 pub mod retry;
 pub mod traits;
 
+pub use backpressure_integration::{TaskExecutionFilter, TaskRejectionReason};
 pub use error::CoreError;
 pub use event::{LogLine, LogSource, TaskEvent};
 pub use heartbeat::HeartbeatRecord;
