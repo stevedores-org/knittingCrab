@@ -88,6 +88,7 @@ mod tests {
             resources: Default::default(),
             policy: Default::default(),
             attempt: 0,
+            is_critical: false,
         };
         let worker_id = WorkerId::new();
 
