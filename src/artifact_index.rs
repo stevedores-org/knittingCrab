@@ -1,3 +1,4 @@
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -62,15 +63,27 @@ pub struct ArtifactMetadata {
 }
 
 impl ArtifactMetadata {
-    /// Creates new artifact metadata.
+    /// Creates new artifact metadata with a unique ID.
+    /// ID is based on task_id, artifact_type, path, and timestamp to ensure uniqueness.
+    /// Even multiple artifacts of the same type from the same task will have different IDs.
     pub fn new(task_id: u64, artifact_type: ArtifactType, size_bytes: u64, path: PathBuf) -> Self {
         let created_at = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_secs())
             .unwrap_or(0);
 
+        // Generate unique ID using SHA256 hash of task_id, type, path, and timestamp
+        // This ensures uniqueness even for multiple artifacts of same type from same task
+        let mut hasher = Sha256::new();
+        hasher.update(task_id.to_le_bytes());
+        hasher.update(artifact_type.as_str().as_bytes());
+        hasher.update(path.to_string_lossy().as_bytes());
+        hasher.update(created_at.to_le_bytes());
+        let hash = format!("{:x}", hasher.finalize());
+        let short_hash = &hash[..16]; // Use first 16 chars for readability
+
         ArtifactMetadata {
-            id: format!("{}_{}", task_id, artifact_type.as_str()),
+            id: format!("{}_{}{}", task_id, artifact_type.as_str(), short_hash),
             task_id,
             artifact_type,
             size_bytes,
@@ -389,5 +402,41 @@ mod tests {
         // All should be active
         assert_eq!(index.total_artifacts(), 2);
         assert_eq!(index.active_artifacts(), 2);
+    }
+
+    #[test]
+    fn artifact_ids_are_unique_for_same_task_and_type() {
+        // Test that multiple artifacts of the same type from the same task have unique IDs
+        let artifact1 = ArtifactMetadata::new(1, ArtifactType::Log, 1024, PathBuf::from("/log1"));
+        let artifact2 = ArtifactMetadata::new(1, ArtifactType::Log, 2048, PathBuf::from("/log2"));
+
+        // IDs must be different even though task_id and type are the same
+        assert_ne!(
+            artifact1.id, artifact2.id,
+            "Multiple artifacts of same type from same task must have unique IDs"
+        );
+    }
+
+    #[test]
+    fn multiple_same_type_artifacts_no_collision() {
+        // Test that registering multiple artifacts of the same type doesn't cause collisions
+        let mut index = ArtifactIndex::new(RetentionPolicy::unlimited());
+
+        let artifact1 =
+            ArtifactMetadata::new(1, ArtifactType::Log, 1024, PathBuf::from("/log1"));
+        let artifact2 =
+            ArtifactMetadata::new(1, ArtifactType::Log, 2048, PathBuf::from("/log2"));
+
+        index.register(artifact1.clone());
+        index.register(artifact2.clone());
+
+        // Both should be stored, not overwritten
+        assert_eq!(index.total_artifacts(), 2);
+        assert_eq!(index.get(&artifact1.id), Some(&artifact1));
+        assert_eq!(index.get(&artifact2.id), Some(&artifact2));
+
+        // Both should appear in filtered lists
+        let task_1_logs = index.list_by_task_and_type(1, ArtifactType::Log);
+        assert_eq!(task_1_logs.len(), 2);
     }
 }
