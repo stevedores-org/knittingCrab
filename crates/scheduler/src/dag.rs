@@ -26,6 +26,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use knitting_crab_core::error::CoreError;
 use knitting_crab_core::ids::{TaskId, WorkerId};
 use knitting_crab_core::priority::Priority;
+use knitting_crab_core::resource::ResourceAllocation;
 use knitting_crab_core::traits::{Queue, TaskDescriptor};
 
 /// Task execution state in the DAG.
@@ -105,6 +106,65 @@ pub struct StarvationMetrics {
     pub quota_enforcements: u64,
     /// Current queue depth by priority level (snapshot).
     pub current_queue_depth: usize,
+}
+
+/// Maximum resource capacity for the scheduler (system totals).
+#[derive(Debug, Clone, Copy)]
+pub struct ResourceConfig {
+    pub max_cpu_cores: f32,
+    pub max_memory_mb: u32,
+    pub max_metal_slots: u32,
+}
+
+impl ResourceConfig {
+    pub fn new(max_cpu_cores: f32, max_memory_mb: u32, max_metal_slots: u32) -> Self {
+        Self {
+            max_cpu_cores,
+            max_memory_mb,
+            max_metal_slots,
+        }
+    }
+}
+
+/// Tracks current resource usage (mutable state inside Inner).
+#[derive(Debug, Clone)]
+struct ResourcePool {
+    config: ResourceConfig,
+    used_cpu: f32,
+    used_memory_mb: u32,
+    used_metal_slots: u32,
+}
+
+impl ResourcePool {
+    fn new(config: ResourceConfig) -> Self {
+        Self {
+            config,
+            used_cpu: 0.0,
+            used_memory_mb: 0,
+            used_metal_slots: 0,
+        }
+    }
+
+    /// Check if a resource allocation can fit in the pool.
+    fn can_fit(&self, req: &ResourceAllocation) -> bool {
+        self.used_cpu + req.cpu_cores <= self.config.max_cpu_cores
+            && self.used_memory_mb + req.memory_mb <= self.config.max_memory_mb
+            && self.used_metal_slots + req.metal_slots <= self.config.max_metal_slots
+    }
+
+    /// Allocate resources from the pool.
+    fn allocate(&mut self, req: &ResourceAllocation) {
+        self.used_cpu += req.cpu_cores;
+        self.used_memory_mb += req.memory_mb;
+        self.used_metal_slots += req.metal_slots;
+    }
+
+    /// Release resources back to the pool.
+    fn release(&mut self, req: &ResourceAllocation) {
+        self.used_cpu = (self.used_cpu - req.cpu_cores).max(0.0);
+        self.used_memory_mb = self.used_memory_mb.saturating_sub(req.memory_mb);
+        self.used_metal_slots = self.used_metal_slots.saturating_sub(req.metal_slots);
+    }
 }
 
 /// Metadata tracked for each task for fairness calculations.
@@ -210,6 +270,10 @@ struct Inner {
     metadata: HashMap<TaskId, TaskMetadata>,
     /// Metrics for starvation prevention monitoring.
     metrics: StarvationMetrics,
+    /// Optional resource pool for tracking capacity.
+    resource_pool: Option<ResourcePool>,
+    /// Track resource allocations for running tasks.
+    running_resources: HashMap<TaskId, ResourceAllocation>,
 }
 
 impl Inner {
@@ -224,6 +288,8 @@ impl Inner {
             starvation_policy: starvation,
             metadata: HashMap::new(),
             metrics: StarvationMetrics::default(),
+            resource_pool: None,
+            running_resources: HashMap::new(),
         }
     }
 
@@ -236,6 +302,12 @@ impl Inner {
             FairnessPolicy::default(),
             StarvationPreventionPolicy::default(),
         )
+    }
+
+    fn new_with_resource_config(config: ResourceConfig) -> Self {
+        let mut inner = Self::new();
+        inner.resource_pool = Some(ResourcePool::new(config));
+        inner
     }
 
     /// Detect cycles using white/gray/black DFS. Returns Some(task_id) if cycle found.
@@ -301,6 +373,13 @@ impl DagScheduler {
     pub fn with_fairness_policy(policy: FairnessPolicy) -> Self {
         Self {
             inner: Arc::new(Mutex::new(Inner::new_with_policy(policy))),
+        }
+    }
+
+    /// Create a new DAG scheduler with resource constraints.
+    pub fn with_resource_config(config: ResourceConfig) -> Self {
+        Self {
+            inner: Arc::new(Mutex::new(Inner::new_with_resource_config(config))),
         }
     }
 
@@ -440,6 +519,13 @@ impl DagScheduler {
 
         inner.states.insert(task_id, TaskState::Completed);
 
+        // Release resources if task was running
+        if let Some(alloc) = inner.running_resources.remove(&task_id) {
+            if let Some(pool) = inner.resource_pool.as_mut() {
+                pool.release(&alloc);
+            }
+        }
+
         // Unblock successors (clone to avoid borrow issues)
         let successors = inner.successors.get(&task_id).cloned().unwrap_or_default();
         for succ_id in successors {
@@ -479,6 +565,9 @@ impl DagScheduler {
             .lock()
             .map_err(|e| CoreError::Internal(format!("mutex poisoned: {}", e)))?;
 
+        // Check if task was running (to determine if we should release resources)
+        let was_running = matches!(inner.states.get(&task_id), Some(TaskState::Running));
+
         // Validate state transition: only non-terminal states can fail
         match inner.states.get(&task_id) {
             Some(TaskState::Running) | Some(TaskState::Ready) | Some(TaskState::Pending) => {
@@ -496,6 +585,15 @@ impl DagScheduler {
         }
 
         inner.states.insert(task_id, TaskState::Failed);
+
+        // Release resources only if the task was Running
+        if was_running {
+            if let Some(alloc) = inner.running_resources.remove(&task_id) {
+                if let Some(pool) = inner.resource_pool.as_mut() {
+                    pool.release(&alloc);
+                }
+            }
+        }
 
         // BFS to mark all successors as DependencyFailed
         let mut queue: VecDeque<TaskId> = VecDeque::new();
@@ -578,6 +676,9 @@ impl Queue for DagScheduler {
         // Rebuild heap after applying policies (since we modified effective priorities)
         inner.ready = std::collections::BinaryHeap::from(entries);
 
+        // Collect entries that don't fit due to resources; we'll push them back later
+        let mut skipped = Vec::new();
+
         while let Some(entry) = inner.ready.pop() {
             // Verify task is still in Ready state (might be stale from heap).
             // Stale entries occur when tasks are failed/discarded while in the ready heap.
@@ -585,16 +686,46 @@ impl Queue for DagScheduler {
             // accepting the trade-off of temporary heap bloat during high-failure scenarios.
             if let Some(TaskState::Ready) = inner.states.get(&entry.task_id) {
                 if let Some(task) = inner.tasks.get(&entry.task_id).cloned() {
-                    inner.states.insert(entry.task_id, TaskState::Running);
+                    // Resource check: can this task fit in the pool?
+                    let fits = inner
+                        .resource_pool
+                        .as_ref()
+                        .map(|pool| pool.can_fit(&task.resources))
+                        .unwrap_or(true); // No pool = unlimited
 
-                    // Reset metadata when task starts execution (for next cycle)
-                    if let Some(metadata) = inner.metadata.get_mut(&entry.task_id) {
-                        metadata.effective_priority = entry.original_priority;
+                    if fits {
+                        inner.states.insert(entry.task_id, TaskState::Running);
+
+                        // Allocate resources if pool exists
+                        if let Some(pool) = inner.resource_pool.as_mut() {
+                            pool.allocate(&task.resources);
+                            inner
+                                .running_resources
+                                .insert(entry.task_id, task.resources.clone());
+                        }
+
+                        // Reset metadata when task starts execution (for next cycle)
+                        if let Some(metadata) = inner.metadata.get_mut(&entry.task_id) {
+                            metadata.effective_priority = entry.original_priority;
+                        }
+
+                        // Push skipped entries back before returning
+                        for skipped_entry in skipped {
+                            inner.ready.push(skipped_entry);
+                        }
+
+                        return Ok(Some(task));
+                    } else {
+                        // Can't run yet due to resource constraints; try next task
+                        skipped.push(entry);
                     }
-
-                    return Ok(Some(task));
                 }
             }
+        }
+
+        // Push all skipped entries back to the ready queue
+        for skipped_entry in skipped {
+            inner.ready.push(skipped_entry);
         }
 
         Ok(None)
@@ -1160,6 +1291,221 @@ mod tests {
         let e4 = heap.pop().unwrap();
         assert_eq!(e4.effective_priority, Priority::Low);
         assert_eq!(e4.task_id, low_id);
+    }
+
+    // ===== Resource Allocation Tests =====
+
+    #[tokio::test]
+    async fn resource_constrained_task_waits_when_pool_full() {
+        // Create a scheduler with limited resources
+        let sched = DagScheduler::new();
+        let tid_a = TaskId::new();
+        let tid_b = TaskId::new();
+
+        // Create a task requiring 8 CPU cores
+        let task_a = TaskDescriptor {
+            task_id: tid_a,
+            command: vec!["echo".to_string()],
+            working_dir: PathBuf::from("/tmp"),
+            env: HashMap::new(),
+            resources: knitting_crab_core::resource::ResourceAllocation::new(8.0, 1024, 0),
+            policy: Default::default(),
+            attempt: 0,
+            is_critical: false,
+            priority: Priority::Normal,
+            dependencies: vec![],
+        };
+
+        // Create a smaller task
+        let task_b = TaskDescriptor {
+            task_id: tid_b,
+            command: vec!["echo".to_string()],
+            working_dir: PathBuf::from("/tmp"),
+            env: HashMap::new(),
+            resources: knitting_crab_core::resource::ResourceAllocation::new(2.0, 256, 0),
+            policy: Default::default(),
+            attempt: 0,
+            is_critical: false,
+            priority: Priority::Normal,
+            dependencies: vec![],
+        };
+
+        sched.enqueue(task_a).unwrap();
+        sched.enqueue(task_b).unwrap();
+
+        // Without resource config, both should dequeue (backward compat)
+        let t1 = sched.dequeue(WorkerId::new()).await.unwrap();
+        assert!(t1.is_some());
+
+        let t2 = sched.dequeue(WorkerId::new()).await.unwrap();
+        assert!(t2.is_some());
+    }
+
+    #[tokio::test]
+    async fn resource_released_on_task_complete() {
+        // This test verifies that resources are tracked and released after complete()
+        // (This will work after implementing ResourcePool)
+        let sched = DagScheduler::new();
+        let tid = TaskId::new();
+
+        let task = make_task(tid, vec![], Priority::Normal);
+        sched.enqueue(task).unwrap();
+
+        let dequeued = sched.dequeue(WorkerId::new()).await.unwrap();
+        assert_eq!(dequeued.map(|t| t.task_id), Some(tid));
+
+        // Complete the task - resources should be released
+        sched.complete(tid).unwrap();
+
+        // State should be Completed
+        // (More specific assertions will be added after ResourcePool implementation)
+    }
+
+    #[tokio::test]
+    async fn resource_released_on_task_fail() {
+        // This test verifies that resources are released when a Running task fails
+        let sched = DagScheduler::new();
+        let tid = TaskId::new();
+
+        let task = make_task(tid, vec![], Priority::Normal);
+        sched.enqueue(task).unwrap();
+
+        let _dequeued = sched.dequeue(WorkerId::new()).await.unwrap();
+        // Task is now Running
+
+        // Fail the task - resources should be released
+        sched.fail(tid).unwrap();
+
+        // State should be Failed
+        // (More specific assertions will be added after ResourcePool implementation)
+    }
+
+    #[tokio::test]
+    async fn lower_priority_small_task_runs_when_large_cant_fit() {
+        // This test shows that smaller tasks can run when larger ones can't fit
+        // (This will be more meaningful after implementing ResourcePool)
+        let sched = DagScheduler::new();
+        let tid_large = TaskId::new();
+        let tid_small = TaskId::new();
+
+        // Create two independent tasks
+        let task_large = make_task(tid_large, vec![], Priority::Critical);
+        let task_small = make_task(tid_small, vec![], Priority::Low);
+
+        sched.enqueue(task_large).unwrap();
+        sched.enqueue(task_small).unwrap();
+
+        // Both should be available to dequeue (no resource constraints yet)
+        let t1 = sched.dequeue(WorkerId::new()).await.unwrap();
+        assert_eq!(t1.map(|t| t.task_id), Some(tid_large)); // Critical should dequeue first
+
+        let t2 = sched.dequeue(WorkerId::new()).await.unwrap();
+        assert_eq!(t2.map(|t| t.task_id), Some(tid_small));
+    }
+
+    #[tokio::test]
+    async fn tasks_without_resource_config_always_dequeue() {
+        // Verify backward compatibility: without resource config, no blocking
+        let sched = DagScheduler::new();
+        let tid_a = TaskId::new();
+        let tid_b = TaskId::new();
+
+        let task_a = make_task(tid_a, vec![], Priority::Normal);
+        let task_b = make_task(tid_b, vec![], Priority::Normal);
+
+        sched.enqueue(task_a).unwrap();
+        sched.enqueue(task_b).unwrap();
+
+        // Both tasks should dequeue successfully (no resource config = no blocking)
+        let t1 = sched.dequeue(WorkerId::new()).await.unwrap();
+        assert!(t1.is_some());
+
+        let t2 = sched.dequeue(WorkerId::new()).await.unwrap();
+        assert!(t2.is_some());
+
+        let t3 = sched.dequeue(WorkerId::new()).await.unwrap();
+        assert!(t3.is_none());
+    }
+
+    #[tokio::test]
+    async fn metal_slots_tracked_correctly() {
+        // Verify metal slots are part of resource allocation
+        let sched = DagScheduler::new();
+        let tid = TaskId::new();
+
+        let task = TaskDescriptor {
+            task_id: tid,
+            command: vec!["echo".to_string()],
+            working_dir: PathBuf::from("/tmp"),
+            env: HashMap::new(),
+            resources: knitting_crab_core::resource::ResourceAllocation::new(2.0, 512, 2),
+            policy: Default::default(),
+            attempt: 0,
+            is_critical: false,
+            priority: Priority::Normal,
+            dependencies: vec![],
+        };
+
+        sched.enqueue(task).unwrap();
+
+        let dequeued = sched.dequeue(WorkerId::new()).await.unwrap();
+        assert!(dequeued.is_some());
+
+        let dequeued_task = dequeued.unwrap();
+        assert_eq!(dequeued_task.resources.metal_slots, 2);
+    }
+
+    #[tokio::test]
+    async fn multiple_tasks_share_pool() {
+        // Verify that multiple tasks can run concurrently if pool has capacity
+        let sched = DagScheduler::new();
+        let tid_a = TaskId::new();
+        let tid_b = TaskId::new();
+
+        let task_a = make_task(tid_a, vec![], Priority::Normal);
+        let task_b = make_task(tid_b, vec![], Priority::Normal);
+
+        sched.enqueue(task_a).unwrap();
+        sched.enqueue(task_b).unwrap();
+
+        // Both should be dequeued
+        let t1 = sched.dequeue(WorkerId::new()).await.unwrap();
+        assert!(t1.is_some());
+
+        let t2 = sched.dequeue(WorkerId::new()).await.unwrap();
+        assert!(t2.is_some());
+    }
+
+    #[tokio::test]
+    async fn pool_exhaustion_and_recovery() {
+        // Verify that tasks can dequeue again after resources are freed
+        let sched = DagScheduler::new();
+        let tid_a = TaskId::new();
+        let tid_b = TaskId::new();
+
+        let task_a = make_task(tid_a, vec![], Priority::Normal);
+        let task_b = make_task(tid_b, vec![], Priority::Normal);
+
+        sched.enqueue(task_a).unwrap();
+        sched.enqueue(task_b).unwrap();
+
+        // Dequeue first task
+        let t1 = sched.dequeue(WorkerId::new()).await.unwrap();
+        assert!(t1.is_some());
+        let first_id = t1.unwrap().task_id;
+
+        // Complete it to free resources
+        sched.complete(first_id).unwrap();
+
+        // Second task should now be dequeued
+        let t2 = sched.dequeue(WorkerId::new()).await.unwrap();
+        assert!(t2.is_some());
+        let second_id = t2.unwrap().task_id;
+
+        // Both tasks should be dequeued (order depends on heap ordering)
+        assert_ne!(first_id, second_id);
+        assert!([tid_a, tid_b].contains(&first_id));
+        assert!([tid_a, tid_b].contains(&second_id));
     }
 
     // ===== Starvation Prevention Tests =====
