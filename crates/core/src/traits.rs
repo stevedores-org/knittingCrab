@@ -6,11 +6,12 @@ use crate::error::CoreError;
 use crate::event::{LogLine, TaskEvent};
 use crate::ids::{TaskId, WorkerId};
 use crate::lease::Lease;
+use crate::priority::Priority;
 use crate::resource::ResourceAllocation;
 use crate::retry::RetryPolicy;
 
 /// A task descriptor passed to a worker from the queue.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TaskDescriptor {
     pub task_id: TaskId,
     pub command: Vec<String>,
@@ -21,7 +22,13 @@ pub struct TaskDescriptor {
     pub attempt: u32,
     /// Whether this task is critical and should run even under high load.
     /// Non-critical tasks may be rejected when the system enters Critical degradation mode.
+    /// This field is maintained for Phase 1 backward compatibility.
+    /// Prefer using the `priority` field for new code.
     pub is_critical: bool,
+    /// Task priority level for scheduling and fair allocation.
+    /// Determines queue placement and round-robin scheduling order.
+    /// Defaults to Normal priority if not specified.
+    pub priority: Priority,
 }
 
 /// A queue that stores and distributes tasks to workers.
@@ -95,10 +102,32 @@ mod tests {
             policy: RetryPolicy::default(),
             attempt: 0,
             is_critical: false,
+            priority: Priority::Normal,
         };
 
         assert_eq!(desc.task_id, task_id);
         assert_eq!(desc.command[0], "echo");
         assert!(!desc.is_critical);
+        assert_eq!(desc.priority, Priority::Normal);
+    }
+
+    #[test]
+    fn test_task_descriptor_with_critical_priority() {
+        let task_id = TaskId::new();
+        let desc = TaskDescriptor {
+            task_id,
+            command: vec!["critical-task".to_string()],
+            working_dir: PathBuf::from("/tmp"),
+            env: HashMap::new(),
+            resources: ResourceAllocation::default(),
+            policy: RetryPolicy::default(),
+            attempt: 0,
+            is_critical: true,
+            priority: Priority::Critical,
+        };
+
+        assert!(desc.is_critical);
+        assert_eq!(desc.priority, Priority::Critical);
+        assert!(desc.priority.is_critical());
     }
 }
