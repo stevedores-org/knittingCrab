@@ -2,6 +2,17 @@
 
 > This guide helps Claude Code (and human contributors) understand knittingCrab's architecture, conventions, and development workflow. **Reference this before making changes.**
 
+## 🔧 CRITICAL: Environment Setup
+
+**Always use nix-shell before development:**
+```bash
+nix-shell --option binary-caches "https://nix-cache.stevedores.org/"
+```
+
+All development work requires this isolated environment. See `memory/ENVIRONMENT_SETUP.md` for details.
+
+---
+
 ## Project Overview
 
 **knittingCrab** is a resource-aware local task scheduler for AI agent workloads, optimized for macOS M4 Max. It transforms chaotic agent swarms into deterministic "factory lines" by providing:
@@ -70,11 +81,13 @@ knittingCrab/
 │   ├── core/                         # Shared types, traits, error types (Epic 1 boundary)
 │   │   ├── src/
 │   │   │   ├── lib.rs               # Public exports
-│   │   │   ├── error.rs             # SchedulerError, SessionError
+│   │   │   ├── error.rs             # CoreError types
+│   │   │   ├── event.rs             # TaskEvent, LogLine
 │   │   │   ├── lease.rs             # Lease state machine
-│   │   │   ├── work_item.rs         # TaskState, WorkItem, Priority
+│   │   │   ├── traits.rs            # Queue, LeaseStore, GoalLockStore, EventSink
+│   │   │   ├── agent.rs             # AgentBudget, TestGate (Epic 5)
 │   │   │   └── ...                  # Circuit breaker, backpressure, timeout
-│   │   └── tests/                   # Unit tests
+│   │   └── tests/                   # 141 unit tests
 │   │
 │   ├── worker/                       # Worker runtime (Epic 2 complete)
 │   │   ├── src/
@@ -84,11 +97,39 @@ knittingCrab/
 │   │   │   ├── fake_worker.rs       # Test double (no OS processes)
 │   │   │   ├── cancel_token.rs      # Graceful cancellation
 │   │   │   └── retry.rs             # Exponential backoff
-│   │   └── tests/                   # Component & integration tests
+│   │   └── tests/                   # 30 component & integration tests
 │   │
 │   ├── scheduler/                    # Task queue stub (for testing)
 │   │   ├── src/
-│   │   │   └── lib.rs
+│   │   │   └── lib.rs               # StubScheduler
+│   │   └── tests/
+│   │
+│   ├── agent/                        # Agent workloads (Epic 5 new)
+│   │   ├── src/
+│   │   │   ├── lib.rs               # AgentPlan (4 tests)
+│   │   │   ├── goal_lock.rs         # InMemoryGoalLockStore (5 tests)
+│   │   │   ├── budget.rs            # BudgetTracker (5 tests)
+│   │   │   └── test_gate.rs         # TestGateRunner (5 tests)
+│   │   └── 19 total tests
+│   │
+│   ├── transport/                    # Message framing protocol (Epic 5 new)
+│   │   ├── src/
+│   │   │   ├── lib.rs               # FramedTransport
+│   │   │   └── messages.rs          # Request/Response types
+│   │   └── 10 tests
+│   │
+│   ├── coordinator/                  # Server-side state (Epic 5 new)
+│   │   ├── src/
+│   │   │   ├── lib.rs               # Public API
+│   │   │   ├── state.rs             # CoordinatorState, NodeRegistry
+│   │   │   └── server.rs            # CoordinatorServer, handlers
+│   │   └── tests/
+│   │
+│   ├── node/                         # Client-side networking (Epic 5 new)
+│   │   ├── src/
+│   │   │   ├── lib.rs               # Public API
+│   │   │   ├── worker_node.rs       # WorkerNode builder
+│   │   │   └── network_*.rs         # Network trait impls
 │   │   └── tests/
 │   │
 │   └── aivcs-session/                # Remote session manager (Phase 2 new)
@@ -98,7 +139,7 @@ knittingCrab/
 │       │   ├── remote.rs            # RemoteSessionManager, SSH/tmux
 │       │   ├── main.rs              # CLI (attach, list, kill)
 │       │   └── error.rs             # SessionError
-│       └── tests/
+│       └── 14 tests
 │
 ├── src/                              # (Old location, being migrated to crates/)
 │   └── ...                           # Legacy code; prefer crates/ structure
@@ -394,6 +435,13 @@ cargo audit
 - Security: forbids path traversal and shell injection
 - Reference: `crates/aivcs-session/src/session.rs`
 
+### Why GoalLockStore Trait?
+- Prevents duplicate agent execution on same goal
+- DashMap-backed in-memory implementation (fast, lock-free)
+- Enables future implementations (Redis, database, cluster-aware)
+- Trait allows testing with FakeGoalLockStore
+- Reference: `crates/core/src/traits.rs` (definition), `crates/agent/src/goal_lock.rs` (implementation)
+
 ---
 
 ## Common Tasks
@@ -414,11 +462,12 @@ fn my_test_name() {
 ```
 
 ### Add a New Trait
-1. Define in `crates/core/src/lib.rs`
+1. Define in `crates/core/src/traits.rs` (not lib.rs)
 2. Export from `crates/core/src/lib.rs`
-3. Add a FakeImpl for testing
-4. Add at least 3 unit tests
-5. Create a component test using FakeImpl
+3. Add a FakeImpl for testing (e.g., FakeGoalLockStore)
+4. Add at least 3 unit tests for trait contract
+5. Create a component test using real + fake implementations
+6. Example: `GoalLockStore` trait (crates/core/src/traits.rs) with `InMemoryGoalLockStore` impl (crates/agent/src/goal_lock.rs)
 
 ### Add a New Crate
 ```bash
@@ -433,7 +482,12 @@ members = [
     "crates/core",
     "crates/worker",
     "crates/scheduler",
-    "crates/my-feature",  # Add this
+    "crates/agent",           # Epic 5
+    "crates/transport",       # Epic 5
+    "crates/coordinator",     # Epic 5
+    "crates/node",            # Epic 5
+    "crates/aivcs-session",
+    "crates/my-feature",      # Add new crate here
 ]
 ```
 
@@ -487,8 +541,8 @@ cargo test --all
 ## Git & GitHub Workflow
 
 ### Creating a PR
-1. **Branch naming**: `feature/description` or `bugfix/description`
-2. **Base branch**: `develop` (for new features), `main` (for hotfixes)
+1. **Branch naming**: `epic<N>/<description>` or `feature/<description>` or `bugfix/description`
+2. **Base branch**: `develop` (for new features and epics), `main` (for hotfixes only)
 3. **Commit messages**: Clear and descriptive
    ```
    feat: Add deterministic session naming for aivcs-session
