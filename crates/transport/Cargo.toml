@@ -1,0 +1,15 @@
+[package]
+name = "knitting-crab-transport"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+knitting-crab-core = { path = "../core" }
+tokio = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true }
+
+[lints]
+rust.warnings = "deny"
+rust.unsafe_code = "deny"

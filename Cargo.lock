@@ -316,6 +316,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "knitting-crab-coordinator"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "dashmap",
+ "knitting-crab-core",
+ "knitting-crab-scheduler",
+ "knitting-crab-transport",
+ "knitting-crab-worker",
+ "serde",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
 name = "knitting-crab-core"
 version = "0.1.0"
 dependencies = [
@@ -334,6 +349,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "knitting-crab-node"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "knitting-crab-coordinator",
+ "knitting-crab-core",
+ "knitting-crab-transport",
+ "knitting-crab-worker",
+ "serde",
+ "thiserror",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "knitting-crab-scheduler"
 version = "0.1.0"
 dependencies = [
@@ -343,6 +373,17 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-test",
+]
+
+[[package]]
+name = "knitting-crab-transport"
+version = "0.1.0"
+dependencies = [
+ "knitting-crab-core",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
 ]
 
 [[package]]
