@@ -29,6 +29,9 @@ pub struct TaskDescriptor {
     /// Determines queue placement and round-robin scheduling order.
     /// Defaults to Normal priority if not specified.
     pub priority: Priority,
+    /// Task IDs that must complete before this task can run.
+    #[serde(default)]
+    pub dependencies: Vec<TaskId>,
 }
 
 /// A queue that stores and distributes tasks to workers.
@@ -103,6 +106,7 @@ mod tests {
             attempt: 0,
             is_critical: false,
             priority: Priority::Normal,
+            dependencies: vec![],
         };
 
         assert_eq!(desc.task_id, task_id);
@@ -124,6 +128,7 @@ mod tests {
             attempt: 0,
             is_critical: true,
             priority: Priority::Critical,
+            dependencies: vec![],
         };
 
         assert!(desc.is_critical);
