@@ -1,10 +1,12 @@
 use crate::error::{CoordinatorError, CoordinatorResult};
+use crate::ssh_health::{SshHealthMonitor, TcpProbe};
 use crate::state::CoordinatorState;
 use knitting_crab_core::error::CoreError;
 use knitting_crab_core::ids::WorkerId;
 use knitting_crab_core::traits::Queue;
 use knitting_crab_transport::{CoordinatorRequest, CoordinatorResponse, FramedTransport};
 use std::net::SocketAddr;
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::time::interval;
@@ -33,6 +35,17 @@ impl CoordinatorServer {
             )
             .await;
         });
+
+        let probe = Arc::new(TcpProbe {
+            timeout: Duration::from_secs(5),
+        });
+        let monitor = SshHealthMonitor::new(
+            Arc::clone(&self.state.node_registry),
+            probe,
+            Duration::from_secs(30),
+            self.addr.port(),
+        );
+        tokio::spawn(async move { monitor.run().await });
 
         loop {
             let (stream, _) = listener
@@ -190,8 +203,23 @@ impl CoordinatorServer {
         let mut ticker = interval(interval_dur);
         loop {
             ticker.tick().await;
+
+            // Evict stale nodes (passive heartbeat timeout)
             let stale = state.node_registry.stale_nodes(timeout);
             for worker_id in stale {
+                // Requeue active leases for this node
+                if let Ok(leases) = state.active_leases().await {
+                    for lease in leases {
+                        let _ = state.queue.requeue(lease.task_id, lease.attempt + 1).await;
+                    }
+                }
+                state.node_registry.remove(&worker_id);
+                state.cache_index.evict_node(&worker_id);
+            }
+
+            // Evict unhealthy nodes (active probe failures)
+            let unhealthy = state.node_registry.unhealthy_nodes();
+            for worker_id in unhealthy {
                 // Requeue active leases for this node
                 if let Ok(leases) = state.active_leases().await {
                     for lease in leases {
