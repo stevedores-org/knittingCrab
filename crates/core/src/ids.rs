@@ -3,7 +3,7 @@ use std::fmt;
 use uuid::Uuid;
 
 /// Unique identifier for a task.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd, Serialize, Deserialize)]
 pub struct TaskId(Uuid);
 
 impl TaskId {

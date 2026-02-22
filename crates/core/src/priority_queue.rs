@@ -261,6 +261,7 @@ mod tests {
             attempt: 0,
             is_critical: priority.is_critical(),
             priority,
+            dependencies: vec![],
         }
     }
 

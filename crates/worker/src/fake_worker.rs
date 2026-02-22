@@ -196,6 +196,7 @@ mod tests {
             attempt: 0,
             is_critical: false,
             priority: knitting_crab_core::Priority::Normal,
+            dependencies: vec![],
         };
 
         worker.enqueue(task.clone());
@@ -496,6 +497,7 @@ mod tests {
             attempt: 0,
             is_critical: false,
             priority: knitting_crab_core::Priority::Normal,
+            dependencies: vec![],
         };
 
         let mut task2 = task1.clone();
@@ -525,6 +527,7 @@ mod tests {
             attempt: 0,
             is_critical: false,
             priority: knitting_crab_core::Priority::Normal,
+            dependencies: vec![],
         };
 
         worker.enqueue(task);
@@ -634,6 +637,7 @@ mod tests {
             attempt: 0,
             is_critical: false,
             priority: knitting_crab_core::Priority::Normal,
+            dependencies: vec![],
         };
 
         worker1.enqueue(task.clone());
