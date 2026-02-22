@@ -3,7 +3,6 @@ use knitting_crab_core::event::{LogLine, TaskEvent};
 use knitting_crab_core::ids::TaskId;
 use knitting_crab_core::traits::EventSink;
 use knitting_crab_worker::process::{spawn, SpawnParams};
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::timeout;
@@ -24,12 +23,13 @@ impl EventSink for NoOpSink {
 }
 
 #[tokio::test]
+#[cfg(unix)]
 async fn test_wait_cancellation_deadlock() {
     let sink = Arc::new(NoOpSink);
     let params = SpawnParams {
         task_id: TaskId::new(),
         command: vec!["sleep".to_string(), "10".to_string()],
-        working_dir: PathBuf::from("/tmp"),
+        working_dir: std::env::temp_dir(),
         env: Default::default(),
     };
 
