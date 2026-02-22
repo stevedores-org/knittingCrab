@@ -90,13 +90,13 @@ mod tests {
             .unwrap();
 
         Command::new("git")
-            .args(&["config", "user.email", "test@example.com"])
+            .args(["config", "user.email", "test@example.com"])
             .current_dir(&repo_path)
             .output()
             .unwrap();
 
         Command::new("git")
-            .args(&["config", "user.name", "Test User"])
+            .args(["config", "user.name", "Test User"])
             .current_dir(&repo_path)
             .output()
             .unwrap();
@@ -111,7 +111,7 @@ mod tests {
             .unwrap();
 
         Command::new("git")
-            .args(&["commit", "-m", "initial"])
+            .args(["commit", "-m", "initial"])
             .current_dir(&repo_path)
             .output()
             .unwrap();
@@ -125,7 +125,11 @@ mod tests {
                 .create(i, &repo_path, "HEAD")
                 .await
                 .expect("failed to create worktree");
-            assert!(scope.path.exists(), "worktree path {} should exist", scope.path.display());
+            assert!(
+                scope.path.exists(),
+                "worktree path {} should exist",
+                scope.path.display()
+            );
             scopes.push(scope);
         }
 
@@ -153,13 +157,13 @@ mod tests {
             .unwrap();
 
         Command::new("git")
-            .args(&["config", "user.email", "test@example.com"])
+            .args(["config", "user.email", "test@example.com"])
             .current_dir(&repo_path)
             .output()
             .unwrap();
 
         Command::new("git")
-            .args(&["config", "user.name", "Test User"])
+            .args(["config", "user.name", "Test User"])
             .current_dir(&repo_path)
             .output()
             .unwrap();
@@ -174,7 +178,7 @@ mod tests {
             .unwrap();
 
         Command::new("git")
-            .args(&["commit", "-m", "initial"])
+            .args(["commit", "-m", "initial"])
             .current_dir(&repo_path)
             .output()
             .unwrap();
@@ -209,13 +213,13 @@ mod tests {
             .unwrap();
 
         Command::new("git")
-            .args(&["config", "user.email", "test@example.com"])
+            .args(["config", "user.email", "test@example.com"])
             .current_dir(&repo_path)
             .output()
             .unwrap();
 
         Command::new("git")
-            .args(&["config", "user.name", "Test User"])
+            .args(["config", "user.name", "Test User"])
             .current_dir(&repo_path)
             .output()
             .unwrap();
@@ -230,7 +234,7 @@ mod tests {
             .unwrap();
 
         Command::new("git")
-            .args(&["commit", "-m", "initial"])
+            .args(["commit", "-m", "initial"])
             .current_dir(&repo_path)
             .output()
             .unwrap();
@@ -265,13 +269,13 @@ mod tests {
             .unwrap();
 
         Command::new("git")
-            .args(&["config", "user.email", "test@example.com"])
+            .args(["config", "user.email", "test@example.com"])
             .current_dir(&repo_path)
             .output()
             .unwrap();
 
         Command::new("git")
-            .args(&["config", "user.name", "Test User"])
+            .args(["config", "user.name", "Test User"])
             .current_dir(&repo_path)
             .output()
             .unwrap();
@@ -286,7 +290,7 @@ mod tests {
             .unwrap();
 
         Command::new("git")
-            .args(&["commit", "-m", "initial"])
+            .args(["commit", "-m", "initial"])
             .current_dir(&repo_path)
             .output()
             .unwrap();
@@ -300,7 +304,10 @@ mod tests {
         let path = scope.path.clone();
 
         drop(scope);
-        assert!(!path.exists(), "worktree should be removed after first drop");
+        assert!(
+            !path.exists(),
+            "worktree should be removed after first drop"
+        );
 
         // Manually drop again (double-drop) — should not panic
         // This simulates what could happen in unusual error paths
