@@ -1,6 +1,7 @@
 pub mod artifact_index;
 pub mod cache;
 pub mod cache_key;
+pub mod cached_runner;
 pub mod dag;
 pub mod error;
 pub mod heartbeat;
@@ -18,6 +19,7 @@ pub mod worktree;
 pub use artifact_index::{ArtifactIndex, ArtifactMetadata, ArtifactType, RetentionPolicy};
 pub use cache::ArtifactCache;
 pub use cache_key::CacheKeyBuilder;
+pub use cached_runner::{CacheStats, CachedTaskRunner};
 pub use dag::DagEngine;
 pub use error::SchedulerError;
 pub use heartbeat::HeartbeatMonitor;
