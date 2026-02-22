@@ -433,6 +433,7 @@ mod tests {
             policy: RetryPolicy::default(),
             attempt: 0,
             is_critical: false,
+            priority: knitting_crab_core::Priority::Normal,
         };
 
         // Execute task
@@ -475,6 +476,7 @@ mod tests {
             policy: RetryPolicy::default(),
             attempt: 0,
             is_critical: false,
+            priority: knitting_crab_core::Priority::Normal,
         };
 
         // Enqueue and then cancel
