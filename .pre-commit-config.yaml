@@ -1,0 +1,49 @@
+repos:
+  # Standard pre-commit hooks
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.5.0
+    hooks:
+      - id: trailing-whitespace
+        name: Trim trailing whitespace
+
+      - id: end-of-file-fixer
+        name: Fix end of file
+
+      - id: check-yaml
+        name: Check YAML
+        args: ['--unsafe']
+
+      - id: check-toml
+        name: Check TOML
+
+      - id: check-merge-conflict
+        name: Check for merge conflicts
+
+      - id: detect-private-key
+        name: Detect private keys
+
+  # Local Rust checks via system commands
+  - repo: local
+    hooks:
+      - id: cargo-fmt
+        name: cargo fmt
+        description: Run cargo fmt to check formatting
+        entry: cargo fmt --all --
+        language: system
+        types: [rust]
+        pass_filenames: false
+
+      - id: cargo-clippy
+        name: cargo clippy
+        description: Run cargo clippy with warnings as errors
+        entry: cargo clippy --all -- -D warnings
+        language: system
+        types: [rust]
+        pass_filenames: false
+
+# CI-specific configuration
+ci:
+  autofix_commit_msg: 'chore: auto fixes from pre-commit hooks for commit ${commit_sha}'
+  autofix_prs: true
+  autoupdate_commit_msg: 'chore: pre-commit autoupdate'
+  autoupdate_schedule: weekly
