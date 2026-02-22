@@ -19,6 +19,9 @@ pub struct TaskDescriptor {
     pub resources: ResourceAllocation,
     pub policy: RetryPolicy,
     pub attempt: u32,
+    /// Whether this task is critical and should run even under high load.
+    /// Non-critical tasks may be rejected when the system enters Critical degradation mode.
+    pub is_critical: bool,
 }
 
 /// A queue that stores and distributes tasks to workers.
@@ -91,9 +94,11 @@ mod tests {
             resources: ResourceAllocation::default(),
             policy: RetryPolicy::default(),
             attempt: 0,
+            is_critical: false,
         };
 
         assert_eq!(desc.task_id, task_id);
         assert_eq!(desc.command[0], "echo");
+        assert!(!desc.is_critical);
     }
 }
