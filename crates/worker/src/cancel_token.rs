@@ -60,7 +60,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_cancel_token_basic() {
-        let (token, mut guard) = CancelToken::new();
+        let (token, guard) = CancelToken::new();
         assert!(!guard.is_cancelled());
 
         token.cancel();
@@ -69,7 +69,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_cancel_idempotent() {
-        let (token, mut guard) = CancelToken::new();
+        let (token, guard) = CancelToken::new();
         token.cancel();
         token.cancel();
         assert!(guard.is_cancelled());
@@ -95,8 +95,8 @@ mod tests {
     #[tokio::test]
     async fn test_multiple_guards() {
         let (token, guard1) = CancelToken::new();
-        let mut guard2 = guard1.clone();
-        let mut guard3 = guard1.clone();
+        let guard2 = guard1.clone();
+        let guard3 = guard1.clone();
 
         token.cancel();
         assert!(guard2.is_cancelled());
