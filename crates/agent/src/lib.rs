@@ -125,7 +125,7 @@ mod tests {
     fn agent_plan_step_names_are_descriptive() {
         let plan = AgentPlan::default_template("my-goal", PathBuf::from("/tmp"));
 
-        let step_names = vec!["Analyzing", "Applying", "Running", "Summarizing"];
+        let step_names = ["Analyzing", "Applying", "Running", "Summarizing"];
         for (step, expected_word) in plan.steps.iter().zip(step_names.iter()) {
             let command_str = step.command.join(" ");
             assert!(
