@@ -22,6 +22,12 @@ pub enum FakeBehavior {
     Crash,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ResourceBehavior {
+    AlwaysAllow,
+    AlwaysDeny,
+}
+
 /// A test double that implements all traits and doesn't spawn real processes.
 #[derive(Clone)]
 pub struct FakeWorker {
@@ -29,6 +35,7 @@ pub struct FakeWorker {
     events: Arc<Mutex<Vec<TaskEvent>>>,
     logs: Arc<Mutex<Vec<LogLine>>>,
     behaviors: Arc<Mutex<std::collections::HashMap<TaskId, FakeBehavior>>>,
+    resource_behavior: Arc<Mutex<ResourceBehavior>>,
     #[allow(dead_code)]
     worker_id: WorkerId,
 }
@@ -40,8 +47,13 @@ impl FakeWorker {
             events: Arc::new(Mutex::new(Vec::new())),
             logs: Arc::new(Mutex::new(Vec::new())),
             behaviors: Arc::new(Mutex::new(std::collections::HashMap::new())),
+            resource_behavior: Arc::new(Mutex::new(ResourceBehavior::AlwaysAllow)),
             worker_id: WorkerId::new(),
         }
+    }
+
+    pub fn set_resource_behavior(&self, behavior: ResourceBehavior) {
+        *self.resource_behavior.lock().unwrap() = behavior;
     }
 
     pub fn enqueue(&self, task: TaskDescriptor) {
@@ -102,7 +114,10 @@ impl Queue for FakeWorker {
 #[async_trait]
 impl ResourceMonitor for FakeWorker {
     async fn can_allocate(&self, _allocation: &ResourceAllocation) -> Result<bool, CoreError> {
-        Ok(true)
+        match *self.resource_behavior.lock().unwrap() {
+            ResourceBehavior::AlwaysAllow => Ok(true),
+            ResourceBehavior::AlwaysDeny => Ok(false),
+        }
     }
 
     async fn allocate(&self, _allocation: &ResourceAllocation) -> Result<(), CoreError> {
