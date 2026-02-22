@@ -1,0 +1,309 @@
+use async_trait::async_trait;
+use std::sync::Arc;
+use std::time::Duration;
+use tokio::time::{interval, sleep};
+use tracing::{debug, error, info};
+
+use knitting_crab_core::event::TaskEvent;
+use knitting_crab_core::ids::WorkerId;
+use knitting_crab_core::lease::Lease;
+use knitting_crab_core::retry::ExitOutcome;
+use knitting_crab_core::traits::{EventSink, LeaseStore, Queue, ResourceMonitor};
+
+use crate::cancel_token::{CancelGuard, CancelToken};
+use crate::error::WorkerError;
+use crate::lease_manager::LeaseManager;
+use crate::process::SpawnParams;
+use crate::retry_handler::RetryHandler;
+
+/// Trait for executing processes (abstracted for testing).
+#[async_trait]
+pub trait ProcessExecutor: Send + Sync {
+    async fn execute(
+        &self,
+        params: SpawnParams,
+        sink: Arc<dyn EventSink>,
+        cancel_guard: CancelGuard,
+    ) -> Result<ExitOutcome, WorkerError>;
+}
+
+/// Real process executor using OS processes.
+pub struct RealProcessExecutor;
+
+#[async_trait]
+impl ProcessExecutor for RealProcessExecutor {
+    async fn execute(
+        &self,
+        params: SpawnParams,
+        sink: Arc<dyn EventSink>,
+        mut cancel_guard: CancelGuard,
+    ) -> Result<ExitOutcome, WorkerError> {
+        let mut handle = crate::process::spawn(params.clone(), sink).await?;
+
+        let outcome = tokio::select! {
+            result = handle.wait() => result,
+            _ = cancel_guard.cancelled() => {
+                handle.kill_gracefully(Duration::from_secs(5)).await
+            }
+        }?;
+
+        Ok(outcome)
+    }
+}
+
+/// Main worker runtime orchestrating task execution.
+pub struct WorkerRuntime<Q: Queue, LS: LeaseStore + Clone, RM: ResourceMonitor, ES: EventSink + Clone, PE: ProcessExecutor> {
+    worker_id: WorkerId,
+    queue: Q,
+    lease_store: LS,
+    lease_manager: LeaseManager<LS>,
+    resource_monitor: RM,
+    event_sink: ES,
+    process_executor: PE,
+    lease_ttl: Duration,
+    heartbeat_interval_ms: u64,
+    reaper_interval_ms: u64,
+}
+
+impl<Q: Queue, LS: LeaseStore + Clone, RM: ResourceMonitor, ES: EventSink + Clone, PE: ProcessExecutor>
+    WorkerRuntime<Q, LS, RM, ES, PE>
+{
+    pub fn new(
+        worker_id: WorkerId,
+        queue: Q,
+        lease_store: LS,
+        resource_monitor: RM,
+        event_sink: ES,
+        process_executor: PE,
+    ) -> Self {
+        let lease_manager = LeaseManager::new(lease_store.clone());
+        Self {
+            worker_id,
+            queue,
+            lease_store,
+            lease_manager,
+            resource_monitor,
+            event_sink,
+            process_executor,
+            lease_ttl: Duration::from_secs(30),
+            heartbeat_interval_ms: 5000,
+            reaper_interval_ms: 10000,
+        }
+    }
+
+    pub fn with_lease_ttl(mut self, ttl: Duration) -> Self {
+        self.lease_ttl = ttl;
+        self
+    }
+
+    pub fn with_heartbeat_interval(mut self, interval_ms: u64) -> Self {
+        self.heartbeat_interval_ms = interval_ms;
+        self
+    }
+
+    pub fn with_reaper_interval(mut self, interval_ms: u64) -> Self {
+        self.reaper_interval_ms = interval_ms;
+        self
+    }
+
+    /// Main worker loop: dequeue, execute, retry cycle.
+    pub async fn worker_loop(&self) -> Result<(), WorkerError> {
+        loop {
+            match self.queue.dequeue(self.worker_id).await {
+                Ok(Some(task)) => {
+                    if let Err(e) = self.execute_task(&task).await {
+                        error!("task execution error: {}", e);
+                    }
+                }
+                Ok(None) => {
+                    sleep(Duration::from_millis(100)).await;
+                }
+                Err(e) => {
+                    error!("queue error: {}", e);
+                    sleep(Duration::from_secs(1)).await;
+                }
+            }
+        }
+    }
+
+    /// Execute a single task with retry logic.
+    async fn execute_task(&self, task: &knitting_crab_core::TaskDescriptor) -> Result<(), WorkerError> {
+        info!("acquiring lease for task {}", task.task_id);
+
+        let lease = Lease::new(task.task_id, self.worker_id, self.lease_ttl, task.attempt);
+        self.lease_manager.acquire(lease.clone()).await?;
+
+        self.event_sink
+            .emit_event(TaskEvent::Acquired {
+                task_id: task.task_id,
+                worker_id: self.worker_id,
+                attempt: task.attempt,
+            })
+            .await?;
+
+        let (cancel_token, cancel_guard) = CancelToken::new();
+        let cancel_token = Arc::new(cancel_token);
+
+        // Spawn heartbeat task
+        let lease_manager = self.lease_manager.clone();
+        let heartbeat_task_id = task.task_id;
+        let heartbeat_interval = self.heartbeat_interval_ms;
+        let lease_store = self.lease_store.clone();
+
+        let heartbeat_handle = tokio::spawn(async move {
+            let mut ticker = interval(Duration::from_millis(heartbeat_interval));
+            loop {
+                ticker.tick().await;
+                match lease_store.get(heartbeat_task_id).await {
+                    Ok(None) => break,
+                    _ => {}
+                }
+                let _ = lease_manager.renew(heartbeat_task_id, Duration::from_secs(30)).await;
+            }
+        });
+
+        let spawn_params = SpawnParams {
+            task_id: task.task_id,
+            command: task.command.clone(),
+            working_dir: task.working_dir.clone(),
+            env: task.env.clone(),
+        };
+
+        let outcome = self
+            .process_executor
+            .execute(spawn_params, Arc::new(self.event_sink.clone()), cancel_guard)
+            .await?;
+
+        heartbeat_handle.abort();
+
+        self.event_sink
+            .emit_event(TaskEvent::Completed {
+                task_id: task.task_id,
+                outcome,
+            })
+            .await?;
+
+        let decision = RetryHandler::decide(outcome, &task.policy, task.attempt);
+
+        match decision {
+            knitting_crab_core::RetryDecision::Complete => {
+                self.lease_manager.complete(task.task_id).await?;
+            }
+            knitting_crab_core::RetryDecision::Retry { delay } => {
+                self.event_sink
+                    .emit_event(TaskEvent::WillRetry {
+                        task_id: task.task_id,
+                        attempt: task.attempt + 1,
+                        delay_ms: delay.as_millis() as u64,
+                    })
+                    .await?;
+
+                self.lease_manager.fail(task.task_id, task.attempt + 1).await?;
+                sleep(delay).await;
+                self.queue.requeue(task.task_id, task.attempt + 1).await?;
+            }
+            knitting_crab_core::RetryDecision::Abandon => {
+                self.event_sink
+                    .emit_event(TaskEvent::Abandoned {
+                        task_id: task.task_id,
+                        reason: "max attempts exceeded".to_string(),
+                    })
+                    .await?;
+
+                self.lease_manager.fail(task.task_id, task.attempt).await?;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Reaper loop: periodically collect expired leases and requeue them.
+    pub async fn reaper_loop(&self) -> Result<(), WorkerError> {
+        let mut ticker = interval(Duration::from_millis(self.reaper_interval_ms));
+
+        loop {
+            ticker.tick().await;
+
+            match self.lease_manager.collect_expired().await {
+                Ok(expired) => {
+                    for lease in expired {
+                        debug!("reaping expired lease: {}", lease.task_id);
+
+                        self.event_sink
+                            .emit_event(TaskEvent::LeaseExpired {
+                                task_id: lease.task_id,
+                            })
+                            .await?;
+
+                        self.queue.requeue(lease.task_id, lease.attempt + 1).await?;
+                    }
+                }
+                Err(e) => {
+                    error!("reaper error: {}", e);
+                }
+            }
+        }
+    }
+
+    /// Cancel a task in progress.
+    pub async fn cancel_task(&self, task_id: knitting_crab_core::ids::TaskId) -> Result<(), WorkerError> {
+        if let Some(lease) = self.lease_store.get(task_id).await? {
+            self.lease_manager.cancel(task_id).await?;
+            self.event_sink
+                .emit_event(TaskEvent::Cancelled { task_id })
+                .await?;
+            self.queue.discard(task_id).await?;
+        }
+
+        Ok(())
+    }
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::lease_manager::InMemoryLeaseStore;
+    use crate::fake_worker::FakeWorker;
+    use knitting_crab_core::resource::ResourceAllocation;
+    use knitting_crab_core::retry::RetryPolicy;
+    use std::path::PathBuf;
+
+    #[tokio::test]
+    async fn test_worker_runtime_basic() {
+        let queue = FakeWorker::new();
+        let lease_store = InMemoryLeaseStore::new();
+        let resource_monitor = FakeWorker::new();
+        let event_sink = FakeWorker::new();
+        let process_executor = FakeWorker::new();
+
+        let worker_id = WorkerId::new();
+        let _runtime = WorkerRuntime::new(
+            worker_id,
+            queue.clone(),
+            lease_store,
+            resource_monitor,
+            event_sink,
+            process_executor,
+        );
+
+        let task = knitting_crab_core::TaskDescriptor {
+            task_id: knitting_crab_core::TaskId::new(),
+            command: vec!["echo".to_string()],
+            working_dir: PathBuf::from("/tmp"),
+            env: Default::default(),
+            resources: ResourceAllocation::default(),
+            policy: RetryPolicy::default(),
+            attempt: 0,
+        };
+
+        queue.enqueue(task.clone());
+
+        // Note: can't directly await the loop, so just verify task was dequeued
+        match queue.dequeue(worker_id).await {
+            Ok(Some(t)) => assert_eq!(t.task_id, task.task_id),
+            _ => panic!("task not found"),
+        }
+    }
+
+}
