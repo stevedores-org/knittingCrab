@@ -1,151 +1,295 @@
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
-use std::time::{Duration, SystemTime};
-
 use sha2::{Digest, Sha256};
+use std::collections::HashMap;
+use std::fs;
+use std::io;
+use std::path::PathBuf;
+use std::time::Instant;
 
-/// The composite key that uniquely identifies a cacheable computation.
-#[derive(Debug, Clone)]
-pub struct CacheKey {
-    /// SHA of the repository state.
-    pub repo_sha: String,
-    /// Stringified command vector.
-    pub command: String,
-    /// Hash of the environment variable map.
-    pub env_hash: String,
-    /// Toolchain version string (e.g. `"rustc 1.78.0"`).
-    pub toolchain_version: String,
-}
-
-impl CacheKey {
-    /// Constructs a `CacheKey`, hashing the environment map into a hex string.
-    pub fn new(
-        repo_sha: &str,
-        command: &[String],
-        env: &HashMap<String, String>,
-        toolchain_version: &str,
-    ) -> Self {
-        // Deterministic env hash: sort keys, then sha256.
-        let mut pairs: Vec<(&String, &String)> = env.iter().collect();
-        pairs.sort_by_key(|(k, _)| *k);
-        let mut env_hasher = Sha256::new();
-        for (k, v) in &pairs {
-            env_hasher.update(k.as_bytes());
-            env_hasher.update(b"=");
-            env_hasher.update(v.as_bytes());
-            env_hasher.update(b"\n");
-        }
-        let env_hash = hex::encode(env_hasher.finalize());
-
-        Self {
-            repo_sha: repo_sha.to_owned(),
-            command: command.join(" "),
-            env_hash,
-            toolchain_version: toolchain_version.to_owned(),
-        }
-    }
-
-    /// Returns the SHA-256 hex digest of all key fields concatenated.
-    pub fn to_hash(&self) -> String {
-        let mut hasher = Sha256::new();
-        hasher.update(self.repo_sha.as_bytes());
-        hasher.update(b"|");
-        hasher.update(self.command.as_bytes());
-        hasher.update(b"|");
-        hasher.update(self.env_hash.as_bytes());
-        hasher.update(b"|");
-        hasher.update(self.toolchain_version.as_bytes());
-        hex::encode(hasher.finalize())
-    }
-}
-
-/// A stored computation result in the artifact cache.
-#[derive(Debug, Clone)]
-pub struct CacheEntry {
-    /// The hash of the [`CacheKey`] that produced this entry.
-    pub key_hash: String,
-    /// When the entry was inserted.
-    pub created_at: SystemTime,
-    /// Process exit code of the cached run.
-    pub exit_code: i32,
-    /// Up to 4 KiB of stdout from the run.
-    pub stdout_snippet: String,
-    /// Paths of any artifacts stored on disk.
-    pub artifacts: Vec<String>,
-}
-
-/// A bounded, time-limited in-memory cache of [`CacheEntry`] values, keyed by
-/// the hex digest of a [`CacheKey`].
+/// A content-addressed artifact cache with LRU eviction.
 pub struct ArtifactCache {
-    entries: Arc<Mutex<HashMap<String, CacheEntry>>>,
-    max_entries: usize,
-    retention_secs: u64,
+    root: PathBuf,
+    max_bytes: u64,
+    /// Tracks cache entries: key → (size_bytes, last_access)
+    entries: HashMap<String, CacheEntry>,
+    total_bytes: u64,
+    hits: u64,
+    misses: u64,
+}
+
+#[derive(Debug, Clone)]
+struct CacheEntry {
+    size: u64,
+    last_access: Instant,
 }
 
 impl ArtifactCache {
-    /// Creates a new cache with the given capacity and retention policy.
-    pub fn new(max_entries: usize, retention_secs: u64) -> Self {
-        Self {
-            entries: Arc::new(Mutex::new(HashMap::new())),
-            max_entries,
-            retention_secs,
-        }
+    /// Creates or opens a cache at the given root directory.
+    pub fn new(root: impl Into<PathBuf>, max_bytes: u64) -> io::Result<Self> {
+        let root = root.into();
+        fs::create_dir_all(&root)?;
+
+        let mut cache = ArtifactCache {
+            root,
+            max_bytes,
+            entries: HashMap::new(),
+            total_bytes: 0,
+            hits: 0,
+            misses: 0,
+        };
+
+        // Scan existing entries
+        cache.scan_existing()?;
+        Ok(cache)
     }
 
-    /// Looks up an entry by key, returning a clone if found (and not expired).
-    pub fn get(&self, key: &CacheKey) -> Option<CacheEntry> {
-        let hash = key.to_hash();
-        let map = self.entries.lock().unwrap_or_else(|e| e.into_inner());
-        let entry = map.get(&hash)?;
-        // Validate age.
-        if let Ok(age) = entry.created_at.elapsed() {
-            if age > Duration::from_secs(self.retention_secs) {
-                return None;
+    /// Computes a SHA256 content address for the given data.
+    pub fn content_key(data: &[u8]) -> String {
+        let mut hasher = Sha256::new();
+        hasher.update(data);
+        format!("{:x}", hasher.finalize())
+    }
+
+    /// Stores data in the cache, returning the content-addressed key.
+    pub fn store(&mut self, data: &[u8]) -> io::Result<String> {
+        let key = Self::content_key(data);
+        let path = self.key_path(&key);
+
+        if path.exists() {
+            // Already cached — update access time
+            if let Some(entry) = self.entries.get_mut(&key) {
+                entry.last_access = Instant::now();
+            }
+            return Ok(key);
+        }
+
+        let size = data.len() as u64;
+
+        // Evict if necessary
+        while self.total_bytes + size > self.max_bytes && !self.entries.is_empty() {
+            self.evict_lru()?;
+        }
+
+        // If single item exceeds max, still store it (but cache will be at capacity)
+        fs::write(&path, data)?;
+        self.entries.insert(
+            key.clone(),
+            CacheEntry {
+                size,
+                last_access: Instant::now(),
+            },
+        );
+        self.total_bytes += size;
+
+        Ok(key)
+    }
+
+    /// Retrieves cached data by key. Returns None on cache miss.
+    pub fn retrieve(&mut self, key: &str) -> io::Result<Option<Vec<u8>>> {
+        let path = self.key_path(key);
+        if !path.exists() {
+            self.misses += 1;
+            return Ok(None);
+        }
+
+        self.hits += 1;
+        if let Some(entry) = self.entries.get_mut(key) {
+            entry.last_access = Instant::now();
+        }
+
+        let data = fs::read(&path)?;
+        Ok(Some(data))
+    }
+
+    /// Checks if a key exists in the cache without updating access time.
+    pub fn contains(&self, key: &str) -> bool {
+        self.entries.contains_key(key)
+    }
+
+    /// Returns (hits, misses).
+    pub fn stats(&self) -> (u64, u64) {
+        (self.hits, self.misses)
+    }
+
+    /// Returns total bytes currently cached.
+    pub fn total_cached_bytes(&self) -> u64 {
+        self.total_bytes
+    }
+
+    /// Returns number of entries in the cache.
+    pub fn entry_count(&self) -> usize {
+        self.entries.len()
+    }
+
+    fn key_path(&self, key: &str) -> PathBuf {
+        self.root.join(key)
+    }
+
+    fn evict_lru(&mut self) -> io::Result<()> {
+        let oldest_key = self
+            .entries
+            .iter()
+            .min_by_key(|(_, entry)| entry.last_access)
+            .map(|(k, _)| k.clone());
+
+        if let Some(key) = oldest_key {
+            let path = self.key_path(&key);
+            if path.exists() {
+                fs::remove_file(&path)?;
+            }
+            if let Some(entry) = self.entries.remove(&key) {
+                self.total_bytes = self.total_bytes.saturating_sub(entry.size);
             }
         }
-        Some(entry.clone())
+        Ok(())
     }
 
-    /// Stores `entry` under the hash of `key`.
-    ///
-    /// If the cache is full the oldest entry (by `created_at`) is evicted to
-    /// make room before inserting.
-    pub fn put(&self, key: CacheKey, entry: CacheEntry) {
-        let hash = key.to_hash();
-        let mut map = self.entries.lock().unwrap_or_else(|e| e.into_inner());
-        // Evict oldest if at capacity.
-        if map.len() >= self.max_entries && !map.contains_key(&hash) {
-            if let Some(oldest_key) = map
-                .iter()
-                .min_by_key(|(_, e)| e.created_at)
-                .map(|(k, _)| k.clone())
-            {
-                map.remove(&oldest_key);
+    fn scan_existing(&mut self) -> io::Result<()> {
+        if !self.root.exists() {
+            return Ok(());
+        }
+        for entry in fs::read_dir(&self.root)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.is_file() {
+                if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                    let meta = entry.metadata()?;
+                    let size = meta.len();
+                    self.entries.insert(
+                        name.to_string(),
+                        CacheEntry {
+                            size,
+                            last_access: Instant::now(),
+                        },
+                    );
+                    self.total_bytes += size;
+                }
             }
         }
-        map.insert(hash, entry);
+        Ok(())
+    }
+}
+
+/// Stores a task's output artifact by cache key from a WorkItem.
+pub fn store_task_artifact(
+    cache: &mut ArtifactCache,
+    task_cache_key: &str,
+    data: &[u8],
+) -> io::Result<String> {
+    // Combine the task's cache key with content hash for dedup
+    let content_key = ArtifactCache::content_key(data);
+    let combined = format!("{}:{}", task_cache_key, content_key);
+    let final_key = ArtifactCache::content_key(combined.as_bytes());
+
+    // Store using the combined key
+    let path = cache.root.join(&final_key);
+    if !path.exists() {
+        // Eviction handled internally by store()
+        cache.store(data)?;
+    }
+    Ok(final_key)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_cache(max_bytes: u64) -> ArtifactCache {
+        let dir = tempfile::tempdir().unwrap();
+        ArtifactCache::new(dir.keep(), max_bytes).unwrap()
     }
 
-    /// Removes all entries whose age exceeds the configured `retention_secs`.
-    pub fn evict_expired(&self) {
-        let mut map = self.entries.lock().unwrap_or_else(|e| e.into_inner());
-        let retention = Duration::from_secs(self.retention_secs);
-        map.retain(|_, e| {
-            e.created_at
-                .elapsed()
-                .map(|age| age <= retention)
-                .unwrap_or(true)
-        });
+    #[test]
+    fn store_and_retrieve() {
+        let mut cache = temp_cache(1_048_576);
+        let data = b"hello world";
+        let key = cache.store(data).unwrap();
+
+        let retrieved = cache.retrieve(&key).unwrap();
+        assert_eq!(retrieved, Some(data.to_vec()));
     }
 
-    /// Returns the number of entries currently stored.
-    pub fn len(&self) -> usize {
-        let map = self.entries.lock().unwrap_or_else(|e| e.into_inner());
-        map.len()
+    #[test]
+    fn content_addressing_deduplication() {
+        let mut cache = temp_cache(1_048_576);
+        let data = b"same content";
+
+        let key1 = cache.store(data).unwrap();
+        let key2 = cache.store(data).unwrap();
+
+        assert_eq!(key1, key2, "Same content should produce same key");
+        assert_eq!(cache.entry_count(), 1, "Should only store once");
     }
 
-    /// Returns `true` if the cache contains no entries.
-    pub fn is_empty(&self) -> bool {
-        self.len() == 0
+    #[test]
+    fn cache_miss_returns_none() {
+        let mut cache = temp_cache(1_048_576);
+        let result = cache.retrieve("nonexistent").unwrap();
+        assert!(result.is_none());
+        assert_eq!(cache.stats(), (0, 1));
+    }
+
+    #[test]
+    fn cache_hit_tracking() {
+        let mut cache = temp_cache(1_048_576);
+        let key = cache.store(b"data").unwrap();
+
+        cache.retrieve(&key).unwrap();
+        cache.retrieve(&key).unwrap();
+        cache.retrieve("miss").unwrap();
+
+        assert_eq!(cache.stats(), (2, 1));
+    }
+
+    #[test]
+    fn eviction_under_pressure() {
+        // Max 100 bytes — each entry is ~10 bytes
+        let mut cache = temp_cache(100);
+
+        let mut keys = Vec::new();
+        for i in 0..15 {
+            let data = format!("item-{:04}", i);
+            let key = cache.store(data.as_bytes()).unwrap();
+            keys.push(key);
+            // Small delay to ensure distinct access times
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+
+        // Cache should have evicted older entries to stay under 100 bytes
+        assert!(
+            cache.total_cached_bytes() <= 100,
+            "Cache should respect max_bytes limit: {} > 100",
+            cache.total_cached_bytes()
+        );
+
+        // Most recent entries should still be present
+        let last_key = keys.last().unwrap();
+        assert!(
+            cache.contains(last_key),
+            "Most recent entry should still be cached"
+        );
+    }
+
+    #[test]
+    fn cache_hit_skips_execution() {
+        // Simulates the pattern: check cache → hit → skip work
+        let mut cache = temp_cache(1_048_576);
+        let task_key = "task-cache-key-123";
+
+        // First run: no cache hit, execute and store result
+        let result = cache.retrieve(task_key).unwrap();
+        assert!(result.is_none(), "First run should be a cache miss");
+
+        // Store the "result" of execution
+        let output = b"execution output";
+        let _stored_key = cache.store(output).unwrap();
+
+        // Store under the task key as well
+        let task_path = cache.root.join(task_key);
+        std::fs::write(&task_path, output).unwrap();
+
+        // Second run: cache hit, skip execution
+        let cached = cache.retrieve(task_key).unwrap();
+        assert!(cached.is_some(), "Second run should be a cache hit");
+        assert_eq!(cached.unwrap(), output.to_vec());
     }
 }

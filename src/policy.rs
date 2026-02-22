@@ -1,77 +1,105 @@
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
-use crate::types::WorkItem;
-
-/// Configuration knobs for the scheduling algorithm.
-#[derive(Debug, Clone)]
-pub struct SchedulerPolicy {
-    /// Maximum number of tasks that may run concurrently.
-    pub max_concurrent_tasks: usize,
-    /// Apply the aging bonus every N scheduler ticks.
-    pub aging_interval_ticks: u32,
-    /// Upper bound on the age bonus to avoid unbounded priority inversion.
-    pub max_age_bonus: u32,
-    /// Base of the exponential back-off in seconds.
-    pub retry_backoff_base_secs: u64,
-    /// Maximum automatic retries for a failing task.
-    pub max_retries: u32,
+pub struct BackoffStrategy {
+    pub base_delay: Duration,
+    pub max_delay: Duration,
+    pub multiplier: f64,
 }
 
-impl Default for SchedulerPolicy {
-    /// Returns a `SchedulerPolicy` with conservative, production-suitable
-    /// defaults.
-    fn default() -> Self {
-        Self {
-            max_concurrent_tasks: 4,
-            aging_interval_ticks: 10,
-            max_age_bonus: 50,
-            retry_backoff_base_secs: 2,
-            max_retries: 3,
-        }
+impl BackoffStrategy {
+    pub fn compute_delay(&self, attempt: u32) -> Duration {
+        // Cap the exponent to avoid overflow in powi for large attempt counts.
+        let capped_attempt = attempt.min(63) as i32;
+        let factor = self.multiplier.powi(capped_attempt);
+        let nanos = (self.base_delay.as_nanos() as f64 * factor) as u128;
+        let computed = Duration::from_nanos(nanos.min(u64::MAX as u128) as u64);
+        computed.min(self.max_delay)
     }
 }
 
-impl SchedulerPolicy {
-    /// Computes `base * 2^retry_count` as the back-off duration.
-    ///
-    /// The result is capped at ~2 hours to prevent absurdly long waits.
-    pub fn compute_backoff(&self, retry_count: u32) -> Duration {
-        let secs = self
-            .retry_backoff_base_secs
-            .saturating_mul(1_u64 << retry_count.min(63));
-        Duration::from_secs(secs.min(7200))
-    }
+pub struct Budget {
+    pub max_tokens: u64,
+    pub used_tokens: u64,
+    pub max_duration: Duration,
+    pub started_at: Instant,
+}
 
-    /// Returns `true` for exit codes that warrant an automatic retry.
-    ///
-    /// - `0` → success (not retried)
-    /// - `1` → task-level failure (not retried by default)
-    /// - `2` → transient / retryable failure
-    /// - `130` → SIGINT (consider retryable)
-    pub fn is_retryable_exit_code(&self, exit_code: i32) -> bool {
-        matches!(exit_code, 2 | 130)
-    }
-
-    /// Increments the `priority_age_bonus` of every task that has been waiting
-    /// for at least `aging_interval_ticks` ticks, up to `max_age_bonus`.
-    ///
-    /// `tick` is the current scheduler tick counter.
-    pub fn apply_aging(&self, tasks: &mut [WorkItem], tick: u32) {
-        if !tick.is_multiple_of(self.aging_interval_ticks.max(1)) {
-            return;
-        }
-        for task in tasks.iter_mut() {
-            if task.priority_age_bonus < self.max_age_bonus {
-                task.priority_age_bonus += 1;
-            }
+impl Budget {
+    pub fn new(max_tokens: u64, max_duration: Duration) -> Self {
+        Budget {
+            max_tokens,
+            used_tokens: 0,
+            max_duration,
+            started_at: Instant::now(),
         }
     }
 
-    /// Sorts `tasks` so that the highest-urgency task comes first.
-    ///
-    /// Ordering uses [`WorkItem::effective_priority_score`]: lower score ⟹
-    /// higher urgency.
-    pub fn sort_by_effective_priority(tasks: &mut [WorkItem]) {
-        tasks.sort();
+    #[must_use]
+    pub fn is_token_exhausted(&self) -> bool {
+        self.used_tokens >= self.max_tokens
+    }
+
+    #[must_use]
+    pub fn is_time_exhausted(&self) -> bool {
+        self.started_at.elapsed() >= self.max_duration
+    }
+
+    /// Charge tokens; returns false if the charge would exceed the budget.
+    pub fn charge_tokens(&mut self, amount: u64) -> bool {
+        if self.used_tokens + amount > self.max_tokens {
+            return false;
+        }
+        self.used_tokens += amount;
+        true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn retries_with_exponential_backoff() {
+        let strategy = BackoffStrategy {
+            base_delay: Duration::from_millis(100),
+            max_delay: Duration::from_secs(10),
+            multiplier: 2.0,
+        };
+        let d0 = strategy.compute_delay(0);
+        let d1 = strategy.compute_delay(1);
+        let d2 = strategy.compute_delay(2);
+        assert!(d1 > d0, "delay should increase with retries");
+        assert!(d2 > d1, "delay should increase with retries");
+    }
+
+    #[test]
+    fn backoff_capped_at_max_delay() {
+        let strategy = BackoffStrategy {
+            base_delay: Duration::from_millis(100),
+            max_delay: Duration::from_millis(500),
+            multiplier: 10.0,
+        };
+        let d = strategy.compute_delay(10);
+        assert!(d <= Duration::from_millis(500));
+    }
+
+    #[test]
+    fn budget_token_exhaustion() {
+        let mut budget = Budget::new(10, Duration::from_secs(60));
+        assert!(budget.charge_tokens(5));
+        assert!(budget.charge_tokens(5));
+        assert!(!budget.charge_tokens(1));
+        assert!(budget.is_token_exhausted());
+    }
+
+    #[test]
+    fn budget_time_exhaustion() {
+        let budget = Budget {
+            max_tokens: 100,
+            used_tokens: 0,
+            max_duration: Duration::from_millis(1),
+            started_at: Instant::now() - Duration::from_secs(1),
+        };
+        assert!(budget.is_time_exhausted());
     }
 }

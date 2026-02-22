@@ -1,192 +1,150 @@
-use std::collections::{HashMap, HashSet};
-use std::sync::{Arc, Mutex};
+use crate::error::SchedulerError;
+use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
-use uuid::Uuid;
-
-use crate::error::{Result, SchedulerError};
-
-/// An exclusive, time-bounded grant that allows a worker to run a task.
-///
-/// Workers must call [`LeaseManager::renew_heartbeat`] periodically to signal
-/// liveness; failure to do so marks the lease as overdue.
 #[derive(Debug, Clone)]
 pub struct Lease {
-    /// Unique identifier for this lease (UUID v4).
-    pub id: String,
-    /// ID of the task this lease covers.
-    pub task_id: String,
-    /// ID of the worker that holds this lease.
-    pub worker_id: String,
-    /// Moment the lease was issued.
+    pub id: u64,
+    pub task_id: u64,
+    pub worker_id: u64,
     pub granted_at: Instant,
-    /// Moment after which the lease is considered expired.
     pub expires_at: Instant,
-    /// Moment of the most recent heartbeat (or `granted_at` initially).
-    pub last_heartbeat: Instant,
-    /// How often the worker must heartbeat (in seconds).
-    pub heartbeat_interval_secs: u64,
+    pub cpu_cores: u32,
+    pub ram_mb: u64,
+    pub gpu: bool,
 }
 
 impl Lease {
-    /// Creates a new lease, starting the clock immediately.
-    pub fn new(
-        task_id: &str,
-        worker_id: &str,
-        duration_secs: u64,
-        heartbeat_interval_secs: u64,
-    ) -> Self {
-        let now = Instant::now();
-        Self {
-            id: Uuid::new_v4().to_string(),
-            task_id: task_id.to_owned(),
-            worker_id: worker_id.to_owned(),
-            granted_at: now,
-            expires_at: now + Duration::from_secs(duration_secs),
-            last_heartbeat: now,
-            heartbeat_interval_secs,
-        }
-    }
-
-    /// Returns `true` if the lease has passed its expiry time.
+    #[must_use]
     pub fn is_expired(&self) -> bool {
-        Instant::now() > self.expires_at
-    }
-
-    /// Returns `true` if the last heartbeat is older than the required interval.
-    pub fn heartbeat_overdue(&self) -> bool {
-        let deadline = self.last_heartbeat + Duration::from_secs(self.heartbeat_interval_secs);
-        Instant::now() > deadline
-    }
-
-    /// Records a fresh heartbeat, resetting the overdue timer.
-    pub fn renew_heartbeat(&mut self) {
-        self.last_heartbeat = Instant::now();
-    }
-
-    /// Returns the [`Duration`] until the lease expires, or `None` if already
-    /// expired.
-    pub fn time_remaining(&self) -> Option<Duration> {
-        self.expires_at.checked_duration_since(Instant::now())
+        Instant::now() >= self.expires_at
     }
 }
 
-// ── LeaseManager ─────────────────────────────────────────────────────────────
-
-/// Central registry of all active leases and exclusive goal locks.
+/// Manages task leases. This struct has no internal locking — the caller
+/// (Scheduler) is responsible for synchronization via its own RwLock.
 pub struct LeaseManager {
-    leases: Arc<Mutex<HashMap<String, Lease>>>,
-    goal_locks: Arc<Mutex<HashSet<String>>>, // "repo:branch:goal_hash"
+    leases: HashMap<u64, Lease>,
+    next_id: u64,
 }
 
 impl LeaseManager {
-    /// Creates a new, empty `LeaseManager`.
     pub fn new() -> Self {
-        Self {
-            leases: Arc::new(Mutex::new(HashMap::new())),
-            goal_locks: Arc::new(Mutex::new(HashSet::new())),
+        LeaseManager {
+            leases: HashMap::new(),
+            next_id: 1,
         }
     }
 
-    /// Grants a new lease for `task_id` / `worker_id` and stores it.
-    pub fn acquire_lease(
-        &self,
-        task_id: &str,
-        worker_id: &str,
-        duration_secs: u64,
-        heartbeat_secs: u64,
-    ) -> Result<Lease> {
-        let lease = Lease::new(task_id, worker_id, duration_secs, heartbeat_secs);
-        let mut map = self
-            .leases
-            .lock()
-            .map_err(|_| SchedulerError::LockContention {
-                resource: "leases".to_owned(),
-            })?;
-        map.insert(lease.id.clone(), lease.clone());
+    /// Grants a lease for a task. Returns an error if the task already has an active lease.
+    pub fn grant_lease(
+        &mut self,
+        task_id: u64,
+        worker_id: u64,
+        cpu: u32,
+        ram: u64,
+        gpu: bool,
+        duration: Duration,
+    ) -> Result<Lease, SchedulerError> {
+        if self.has_active_lease(task_id) {
+            return Err(SchedulerError::LeaseConflict { task_id });
+        }
+        let id = self.next_id;
+        self.next_id += 1;
+        let now = Instant::now();
+        let lease = Lease {
+            id,
+            task_id,
+            worker_id,
+            granted_at: now,
+            expires_at: now + duration,
+            cpu_cores: cpu,
+            ram_mb: ram,
+            gpu,
+        };
+        self.leases.insert(id, lease.clone());
         Ok(lease)
     }
 
-    /// Refreshes the heartbeat timestamp for the lease identified by `lease_id`.
-    pub fn renew_heartbeat(&self, lease_id: &str) -> Result<()> {
-        let mut map = self
-            .leases
-            .lock()
-            .map_err(|_| SchedulerError::LockContention {
-                resource: "leases".to_owned(),
-            })?;
-        let lease = map
-            .get_mut(lease_id)
-            .ok_or_else(|| SchedulerError::LeaseExpired {
-                task_id: lease_id.to_owned(),
-            })?;
-        lease.renew_heartbeat();
-        Ok(())
+    pub fn revoke_lease(&mut self, lease_id: u64) -> Option<Lease> {
+        self.leases.remove(&lease_id)
     }
 
-    /// Removes and discards the lease identified by `lease_id`.
-    pub fn release_lease(&self, lease_id: &str) -> Result<()> {
-        let mut map = self
-            .leases
-            .lock()
-            .map_err(|_| SchedulerError::LockContention {
-                resource: "leases".to_owned(),
-            })?;
-        map.remove(lease_id)
-            .ok_or_else(|| SchedulerError::LeaseExpired {
-                task_id: lease_id.to_owned(),
-            })?;
-        Ok(())
-    }
-
-    /// Returns the IDs of all leases that have passed their expiry time.
-    pub fn check_expired(&self) -> Vec<String> {
-        let map = self.leases.lock().unwrap_or_else(|e| e.into_inner());
-        map.values()
+    pub fn expired_leases(&self) -> Vec<Lease> {
+        self.leases
+            .values()
             .filter(|l| l.is_expired())
-            .map(|l| l.id.clone())
+            .cloned()
             .collect()
     }
 
-    /// Acquires an exclusive lock on the named goal.
-    ///
-    /// Returns [`SchedulerError::GoalAlreadyLocked`] if another agent holds
-    /// the lock.
-    pub fn lock_goal(&self, repo: &str, branch: &str, goal_hash: &str) -> Result<()> {
-        let key = format!("{repo}:{branch}:{goal_hash}");
-        let mut locks = self
-            .goal_locks
-            .lock()
-            .map_err(|_| SchedulerError::LockContention {
-                resource: "goal_locks".to_owned(),
-            })?;
-        if locks.contains(&key) {
-            return Err(SchedulerError::GoalAlreadyLocked {
-                repo: repo.to_owned(),
-                branch: branch.to_owned(),
-            });
-        }
-        locks.insert(key);
-        Ok(())
-    }
-
-    /// Releases the exclusive lock on the named goal (no-op if not held).
-    pub fn unlock_goal(&self, repo: &str, branch: &str, goal_hash: &str) {
-        let key = format!("{repo}:{branch}:{goal_hash}");
-        if let Ok(mut locks) = self.goal_locks.lock() {
-            locks.remove(&key);
+    pub fn heartbeat(&mut self, lease_id: u64, extension: Duration) -> bool {
+        if let Some(lease) = self.leases.get_mut(&lease_id) {
+            lease.expires_at = Instant::now() + extension;
+            true
+        } else {
+            false
         }
     }
 
-    /// Returns the number of currently active (not-yet-released) leases.
-    pub fn active_lease_count(&self) -> usize {
-        let map = self.leases.lock().unwrap_or_else(|e| e.into_inner());
-        map.len()
+    fn has_active_lease(&self, task_id: u64) -> bool {
+        self.leases.values().any(|l| l.task_id == task_id)
     }
 }
 
 impl Default for LeaseManager {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn lease_expires_requeues_task() {
+        let mut mgr = LeaseManager::new();
+        let lease = mgr
+            .grant_lease(42, 1, 2, 512, false, Duration::from_millis(1))
+            .unwrap();
+        std::thread::sleep(Duration::from_millis(5));
+        let expired = mgr.expired_leases();
+        assert!(expired.iter().any(|l| l.id == lease.id));
+    }
+
+    #[test]
+    fn heartbeat_extends_lease() {
+        let mut mgr = LeaseManager::new();
+        let lease = mgr
+            .grant_lease(1, 1, 1, 256, false, Duration::from_millis(10))
+            .unwrap();
+        std::thread::sleep(Duration::from_millis(5));
+        let extended = mgr.heartbeat(lease.id, Duration::from_secs(60));
+        assert!(extended);
+        assert!(mgr.expired_leases().is_empty());
+    }
+
+    #[test]
+    fn revoke_removes_lease() {
+        let mut mgr = LeaseManager::new();
+        let lease = mgr
+            .grant_lease(1, 1, 1, 256, false, Duration::from_secs(60))
+            .unwrap();
+        let revoked = mgr.revoke_lease(lease.id);
+        assert!(revoked.is_some());
+        assert!(mgr.revoke_lease(lease.id).is_none());
+    }
+
+    #[test]
+    fn duplicate_lease_prevention() {
+        let mut mgr = LeaseManager::new();
+        mgr.grant_lease(42, 1, 1, 256, false, Duration::from_secs(60))
+            .unwrap();
+        let result = mgr.grant_lease(42, 2, 1, 256, false, Duration::from_secs(60));
+        assert!(matches!(
+            result.unwrap_err(),
+            SchedulerError::LeaseConflict { task_id: 42 }
+        ));
     }
 }
