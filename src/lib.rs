@@ -1,4 +1,5 @@
 pub mod cache;
+pub mod cache_key;
 pub mod dag;
 pub mod error;
 pub mod lease;
@@ -13,6 +14,7 @@ pub mod worker;
 pub mod worktree;
 
 pub use cache::ArtifactCache;
+pub use cache_key::CacheKeyBuilder;
 pub use dag::DagEngine;
 pub use error::SchedulerError;
 pub use lease::{Lease, LeaseManager};
