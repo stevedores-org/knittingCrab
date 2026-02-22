@@ -73,14 +73,28 @@ pub enum SessionError {
 
     #[error("internal error: {0}")]
     Internal(String),
+
+    #[error("invalid configuration: {0}")]
+    InvalidConfig(String),
 }
 
 /// Session configuration for tmux on remote aivcs.
 #[derive(Debug, Clone)]
 pub struct SessionConfig {
-    pub repo_name: String,
-    pub work_id: String,
-    pub role: Role,
+    repo_name: String,
+    work_id: String,
+    role: Role,
+}
+
+impl Default for SessionConfig {
+    fn default() -> Self {
+        // Safe defaults for testing
+        Self {
+            repo_name: "test-repo".to_string(),
+            work_id: "test-work".to_string(),
+            role: Role::Agent,
+        }
+    }
 }
 
 impl SessionConfig {
@@ -101,6 +115,24 @@ impl SessionConfig {
             work_id,
             role,
         })
+    }
+
+    /// Get repo name (read-only access).
+    #[allow(dead_code)]
+    pub fn repo_name(&self) -> &str {
+        &self.repo_name
+    }
+
+    /// Get work ID (read-only access).
+    #[allow(dead_code)]
+    pub fn work_id(&self) -> &str {
+        &self.work_id
+    }
+
+    /// Get role (read-only access).
+    #[allow(dead_code)]
+    pub fn role(&self) -> Role {
+        self.role
     }
 
     /// Generate deterministic session name from configuration.
@@ -160,9 +192,10 @@ impl SessionConfig {
         Ok(sanitized)
     }
 
-    /// Get the remote repository path.
+    /// Get the remote repository path (hardcoded safe base, no env var expansion).
     pub fn repo_path(&self) -> String {
-        format!("$HOME/engineering/code/clone-base/{}", self.repo_name)
+        // Use hardcoded base path to prevent $HOME manipulation attacks
+        format!("/home/aivcs/engineering/code/clone-base/{}", self.repo_name)
     }
 }
 
@@ -297,7 +330,7 @@ mod tests {
         let config = SessionConfig::new("my-repo", "job", Role::Runner).unwrap();
         assert_eq!(
             config.repo_path(),
-            "$HOME/engineering/code/clone-base/my-repo"
+            "/home/aivcs/engineering/code/clone-base/my-repo"
         );
     }
 
@@ -310,7 +343,7 @@ mod tests {
         assert_eq!(name, "aivcs__knittingcrab__epic1-us2-123__runner");
         assert_eq!(
             config.repo_path(),
-            "$HOME/engineering/code/clone-base/knittingCrab"
+            "/home/aivcs/engineering/code/clone-base/knittingCrab"
         );
     }
 

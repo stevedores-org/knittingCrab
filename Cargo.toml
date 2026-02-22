@@ -5,7 +5,8 @@ members = [
     "crates/scheduler",
     "crates/transport",
     "crates/coordinator",
-    "crates/node", "crates/aivcs-session",
+    "crates/node",
+    "crates/aivcs-session",
 ]
 resolver = "2"
 

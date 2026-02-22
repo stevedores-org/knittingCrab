@@ -60,15 +60,8 @@ impl ProcessHandle {
                 let _ = kill(Pid::from_raw(-(pid as i32)), Signal::SIGTERM);
             }
         } else {
-            // Process already exited?
-            // If child.id() returns None, the child has already been reaped (awaited).
-            // But we can check if it's done via wait (which might have completed).
-            // However, tokio Child id() returns Some unless the child has been consumed?
-            // tokio Child::id() returns Option<u32>. It returns None if the process has finished.
-            // If it finished, we can just return Success or whatever status it had?
-            // But kill_gracefully implies we want to stop it. If it's stopped, we are good.
-            // But we need the ExitOutcome.
-            // If it's already finished, `wait()` will return immediately.
+            // Process already exited; id() returns None when the child has already been reaped.
+            // The `wait()` call below will return its exit status immediately.
         }
 
         // Wait with grace period
