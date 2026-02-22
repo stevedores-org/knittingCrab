@@ -35,6 +35,9 @@ async fn work_converges_to_completion_under_load() {
             resources: ResourceAllocation::default(),
             policy: RetryPolicy::default(),
             attempt: 0,
+            is_critical: false,
+            priority: knitting_crab_core::Priority::Normal,
+            dependencies: vec![],
         };
         queue.enqueue(task);
     }

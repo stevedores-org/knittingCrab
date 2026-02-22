@@ -193,8 +193,7 @@ impl LeaseStore for SqliteLeaseStore {
 
     async fn active_leases(&self) -> Result<Vec<Lease>, CoreError> {
         let conn = self.conn.lock().unwrap();
-        let mut stmt =
-            conn.prepare("SELECT json_data FROM leases WHERE expires_at > datetime('now')")?;
+        let mut stmt = conn.prepare("SELECT json_data FROM leases WHERE state = 'Active'")?;
 
         let leases = stmt
             .query_map([], |row| {

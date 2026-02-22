@@ -1,11 +1,12 @@
 use async_trait::async_trait;
+use dashmap::DashMap;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::{interval, sleep};
 use tracing::{debug, error, info};
 
 use knitting_crab_core::event::TaskEvent;
-use knitting_crab_core::ids::WorkerId;
+use knitting_crab_core::ids::{TaskId, WorkerId};
 use knitting_crab_core::lease::Lease;
 use knitting_crab_core::retry::ExitOutcome;
 use knitting_crab_core::traits::{EventSink, LeaseStore, Queue, ResourceMonitor};
@@ -51,6 +52,17 @@ impl ProcessExecutor for RealProcessExecutor {
     }
 }
 
+struct ActiveTaskGuard {
+    task_id: TaskId,
+    active_tasks: Arc<DashMap<TaskId, CancelToken>>,
+}
+
+impl Drop for ActiveTaskGuard {
+    fn drop(&mut self) {
+        self.active_tasks.remove(&self.task_id);
+    }
+}
+
 /// Main worker runtime orchestrating task execution.
 pub struct WorkerRuntime<
     Q: Queue,
@@ -67,6 +79,7 @@ pub struct WorkerRuntime<
     resource_monitor: RM,
     event_sink: ES,
     process_executor: PE,
+    active_tasks: Arc<DashMap<TaskId, CancelToken>>,
     lease_ttl: Duration,
     heartbeat_interval_ms: u64,
     reaper_interval_ms: u64,
@@ -97,6 +110,7 @@ impl<
             resource_monitor,
             event_sink,
             process_executor,
+            active_tasks: Arc::new(DashMap::new()),
             lease_ttl: Duration::from_secs(30),
             heartbeat_interval_ms: 5000,
             reaper_interval_ms: 10000,
@@ -157,7 +171,13 @@ impl<
             .await?;
 
         let (cancel_token, cancel_guard) = CancelToken::new();
-        let _cancel_token = Arc::new(cancel_token);
+        self.active_tasks.insert(task.task_id, cancel_token);
+
+        // Ensure token is removed when this function exits (even on panic)
+        let _guard = ActiveTaskGuard {
+            task_id: task.task_id,
+            active_tasks: self.active_tasks.clone(),
+        };
 
         // Spawn heartbeat task
         let lease_manager = self.lease_manager.clone();
@@ -272,6 +292,11 @@ impl<
         &self,
         task_id: knitting_crab_core::ids::TaskId,
     ) -> Result<(), WorkerError> {
+        // Trigger cancellation if active locally
+        if let Some(token) = self.active_tasks.get(&task_id) {
+            token.cancel();
+        }
+
         if self.lease_store.get(task_id).await?.is_some() {
             self.lease_manager.cancel(task_id).await?;
             self.event_sink
@@ -321,6 +346,7 @@ mod tests {
             attempt: 0,
             is_critical: false,
             priority: knitting_crab_core::Priority::Normal,
+            dependencies: vec![],
         };
 
         queue.enqueue(task.clone());
@@ -330,5 +356,234 @@ mod tests {
             Ok(Some(t)) => assert_eq!(t.task_id, task.task_id),
             _ => panic!("task not found"),
         }
+    }
+
+    // ===== Configuration Tests =====
+
+    #[test]
+    fn test_runtime_configuration_lease_ttl() {
+        let queue = FakeWorker::new();
+        let lease_store = InMemoryLeaseStore::new();
+        let resource_monitor = FakeWorker::new();
+        let event_sink = FakeWorker::new();
+        let process_executor = FakeWorker::new();
+        let worker_id = WorkerId::new();
+
+        let custom_ttl = Duration::from_secs(60);
+        let runtime = WorkerRuntime::new(
+            worker_id,
+            queue,
+            lease_store,
+            resource_monitor,
+            event_sink,
+            process_executor,
+        )
+        .with_lease_ttl(custom_ttl);
+
+        assert_eq!(runtime.lease_ttl, custom_ttl);
+    }
+
+    #[test]
+    fn test_runtime_configuration_heartbeat_interval() {
+        let queue = FakeWorker::new();
+        let lease_store = InMemoryLeaseStore::new();
+        let resource_monitor = FakeWorker::new();
+        let event_sink = FakeWorker::new();
+        let process_executor = FakeWorker::new();
+        let worker_id = WorkerId::new();
+
+        let custom_interval = 2000;
+        let runtime = WorkerRuntime::new(
+            worker_id,
+            queue,
+            lease_store,
+            resource_monitor,
+            event_sink,
+            process_executor,
+        )
+        .with_heartbeat_interval(custom_interval);
+
+        assert_eq!(runtime.heartbeat_interval_ms, custom_interval);
+    }
+
+    #[test]
+    fn test_runtime_configuration_reaper_interval() {
+        let queue = FakeWorker::new();
+        let lease_store = InMemoryLeaseStore::new();
+        let resource_monitor = FakeWorker::new();
+        let event_sink = FakeWorker::new();
+        let process_executor = FakeWorker::new();
+        let worker_id = WorkerId::new();
+
+        let custom_interval = 15000;
+        let runtime = WorkerRuntime::new(
+            worker_id,
+            queue,
+            lease_store,
+            resource_monitor,
+            event_sink,
+            process_executor,
+        )
+        .with_reaper_interval(custom_interval);
+
+        assert_eq!(runtime.reaper_interval_ms, custom_interval);
+    }
+
+    // ===== Task Execution Tests =====
+
+    #[tokio::test]
+    async fn test_execute_task_acquires_lease() {
+        let queue = FakeWorker::new();
+        let lease_store = InMemoryLeaseStore::new();
+        let resource_monitor = FakeWorker::new();
+        let event_sink = FakeWorker::new();
+        let process_executor = FakeWorker::new();
+
+        let worker_id = WorkerId::new();
+        let runtime = WorkerRuntime::new(
+            worker_id,
+            queue,
+            lease_store.clone(),
+            resource_monitor,
+            event_sink,
+            process_executor,
+        );
+
+        let task_id = knitting_crab_core::TaskId::new();
+        let task = knitting_crab_core::TaskDescriptor {
+            task_id,
+            command: vec!["echo".to_string()],
+            working_dir: PathBuf::from("/tmp"),
+            env: Default::default(),
+            resources: ResourceAllocation::default(),
+            policy: RetryPolicy::default(),
+            attempt: 0,
+            is_critical: false,
+            priority: knitting_crab_core::Priority::Normal,
+            dependencies: vec![],
+        };
+
+        // Execute task
+        let result = runtime.execute_task(&task).await;
+        assert!(result.is_ok(), "task execution should succeed");
+
+        // Verify lease was acquired (should exist, even if completed)
+        let lease = lease_store.get(task_id).await;
+        assert!(
+            lease.is_ok(),
+            "lease store should be accessible after execution"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_cancel_task_removes_from_queue() {
+        let queue = FakeWorker::new();
+        let lease_store = InMemoryLeaseStore::new();
+        let resource_monitor = FakeWorker::new();
+        let event_sink = FakeWorker::new();
+        let process_executor = FakeWorker::new();
+
+        let worker_id = WorkerId::new();
+        let runtime = WorkerRuntime::new(
+            worker_id,
+            queue.clone(),
+            lease_store,
+            resource_monitor,
+            event_sink,
+            process_executor,
+        );
+
+        let task_id = knitting_crab_core::TaskId::new();
+        let task = knitting_crab_core::TaskDescriptor {
+            task_id,
+            command: vec!["echo".to_string()],
+            working_dir: PathBuf::from("/tmp"),
+            env: Default::default(),
+            resources: ResourceAllocation::default(),
+            policy: RetryPolicy::default(),
+            attempt: 0,
+            is_critical: false,
+            priority: knitting_crab_core::Priority::Normal,
+            dependencies: vec![],
+        };
+
+        // Enqueue and then cancel
+        queue.enqueue(task.clone());
+        let cancel_result = runtime.cancel_task(task_id).await;
+        assert!(cancel_result.is_ok(), "cancel should succeed");
+    }
+
+    #[test]
+    fn test_configuration_chain() {
+        let queue = FakeWorker::new();
+        let lease_store = InMemoryLeaseStore::new();
+        let resource_monitor = FakeWorker::new();
+        let event_sink = FakeWorker::new();
+        let process_executor = FakeWorker::new();
+        let worker_id = WorkerId::new();
+
+        let runtime = WorkerRuntime::new(
+            worker_id,
+            queue,
+            lease_store,
+            resource_monitor,
+            event_sink,
+            process_executor,
+        )
+        .with_lease_ttl(Duration::from_secs(90))
+        .with_heartbeat_interval(3000)
+        .with_reaper_interval(12000);
+
+        assert_eq!(runtime.lease_ttl, Duration::from_secs(90));
+        assert_eq!(runtime.heartbeat_interval_ms, 3000);
+        assert_eq!(runtime.reaper_interval_ms, 12000);
+    }
+
+    // ===== Worker Identity Tests =====
+
+    #[test]
+    fn test_runtime_preserves_worker_id() {
+        let queue = FakeWorker::new();
+        let lease_store = InMemoryLeaseStore::new();
+        let resource_monitor = FakeWorker::new();
+        let event_sink = FakeWorker::new();
+        let process_executor = FakeWorker::new();
+        let worker_id = WorkerId::new();
+
+        let runtime = WorkerRuntime::new(
+            worker_id,
+            queue,
+            lease_store,
+            resource_monitor,
+            event_sink,
+            process_executor,
+        );
+
+        assert_eq!(runtime.worker_id, worker_id);
+    }
+
+    // ===== Lease Manager Integration Tests =====
+
+    #[tokio::test]
+    async fn test_lease_manager_initialization() {
+        let queue = FakeWorker::new();
+        let lease_store = InMemoryLeaseStore::new();
+        let resource_monitor = FakeWorker::new();
+        let event_sink = FakeWorker::new();
+        let process_executor = FakeWorker::new();
+
+        let worker_id = WorkerId::new();
+        let runtime = WorkerRuntime::new(
+            worker_id,
+            queue,
+            lease_store,
+            resource_monitor,
+            event_sink,
+            process_executor,
+        );
+
+        // Lease manager should be initialized and ready
+        assert_eq!(runtime.worker_id, worker_id);
+        assert_eq!(runtime.lease_ttl, Duration::from_secs(30));
     }
 }

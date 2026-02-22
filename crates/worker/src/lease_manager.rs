@@ -66,6 +66,7 @@ impl LeaseStore for InMemoryLeaseStore {
         Ok(self
             .leases
             .iter()
+            .filter(|entry| entry.value().state == knitting_crab_core::lease::LeaseState::Active)
             .map(|entry| entry.value().clone())
             .collect())
     }
@@ -106,10 +107,16 @@ impl<S: LeaseStore + Clone> LeaseManager<S> {
 
         for lease in leases {
             if lease.is_expired() {
-                let mut expired_lease = lease.clone();
-                expired_lease.state = knitting_crab_core::LeaseState::Expired;
-                self.store.update(expired_lease.clone()).await?;
-                expired.push(expired_lease);
+                // Double check: fetch fresh copy to prevent race condition
+                if let Some(mut current) = self.store.get(lease.task_id).await? {
+                    if current.state == knitting_crab_core::LeaseState::Active
+                        && current.is_expired()
+                    {
+                        current.state = knitting_crab_core::LeaseState::Expired;
+                        self.store.update(current.clone()).await?;
+                        expired.push(current);
+                    }
+                }
             }
         }
 
@@ -220,5 +227,250 @@ mod tests {
 
         let lease = manager.store.get(task_id).await.unwrap().unwrap();
         assert!(!lease.is_expired());
+    }
+
+    // ===== Lease State Transitions =====
+
+    #[tokio::test]
+    async fn test_complete_transitions_lease() {
+        let store = InMemoryLeaseStore::new();
+        let manager = LeaseManager::new(store);
+
+        let task_id = TaskId::new();
+        let worker_id = WorkerId::new();
+        let lease = Lease::new(task_id, worker_id, Duration::from_secs(10), 0);
+
+        manager.acquire(lease).await.unwrap();
+        manager.complete(task_id).await.unwrap();
+
+        let lease = manager.store.get(task_id).await.unwrap().unwrap();
+        assert_eq!(lease.state, LeaseState::Completed);
+    }
+
+    #[tokio::test]
+    async fn test_fail_transitions_lease_with_attempts() {
+        let store = InMemoryLeaseStore::new();
+        let manager = LeaseManager::new(store);
+
+        let task_id = TaskId::new();
+        let worker_id = WorkerId::new();
+        let lease = Lease::new(task_id, worker_id, Duration::from_secs(10), 0);
+
+        manager.acquire(lease).await.unwrap();
+        manager.fail(task_id, 3).await.unwrap();
+
+        let lease = manager.store.get(task_id).await.unwrap().unwrap();
+        assert!(matches!(lease.state, LeaseState::Failed { attempts: 3 }));
+    }
+
+    #[tokio::test]
+    async fn test_cancel_transitions_lease() {
+        let store = InMemoryLeaseStore::new();
+        let manager = LeaseManager::new(store);
+
+        let task_id = TaskId::new();
+        let worker_id = WorkerId::new();
+        let lease = Lease::new(task_id, worker_id, Duration::from_secs(10), 0);
+
+        manager.acquire(lease).await.unwrap();
+        manager.cancel(task_id).await.unwrap();
+
+        let lease = manager.store.get(task_id).await.unwrap().unwrap();
+        assert_eq!(lease.state, LeaseState::Cancelled);
+    }
+
+    #[tokio::test]
+    async fn test_remove_deletes_lease() {
+        let store = InMemoryLeaseStore::new();
+        let manager = LeaseManager::new(store);
+
+        let task_id = TaskId::new();
+        let worker_id = WorkerId::new();
+        let lease = Lease::new(task_id, worker_id, Duration::from_secs(10), 0);
+
+        manager.acquire(lease).await.unwrap();
+        manager.remove(task_id).await.unwrap();
+
+        let result = manager.store.get(task_id).await.unwrap();
+        assert!(result.is_none());
+    }
+
+    // ===== Error Handling =====
+
+    #[tokio::test]
+    async fn test_renew_nonexistent_lease_fails() {
+        let store = InMemoryLeaseStore::new();
+        let manager = LeaseManager::new(store);
+
+        let task_id = TaskId::new();
+        let result = manager.renew(task_id, Duration::from_secs(10)).await;
+
+        assert!(matches!(result, Err(CoreError::LeaseNotFound)));
+    }
+
+    #[tokio::test]
+    async fn test_complete_nonexistent_lease_fails() {
+        let store = InMemoryLeaseStore::new();
+        let manager = LeaseManager::new(store);
+
+        let task_id = TaskId::new();
+        let result = manager.complete(task_id).await;
+
+        assert!(matches!(result, Err(CoreError::LeaseNotFound)));
+    }
+
+    #[tokio::test]
+    async fn test_fail_nonexistent_lease_fails() {
+        let store = InMemoryLeaseStore::new();
+        let manager = LeaseManager::new(store);
+
+        let task_id = TaskId::new();
+        let result = manager.fail(task_id, 1).await;
+
+        assert!(matches!(result, Err(CoreError::LeaseNotFound)));
+    }
+
+    #[tokio::test]
+    async fn test_cancel_nonexistent_lease_fails() {
+        let store = InMemoryLeaseStore::new();
+        let manager = LeaseManager::new(store);
+
+        let task_id = TaskId::new();
+        let result = manager.cancel(task_id).await;
+
+        assert!(matches!(result, Err(CoreError::LeaseNotFound)));
+    }
+
+    // ===== Store Operations =====
+
+    #[tokio::test]
+    async fn test_store_get_returns_none_for_missing() {
+        let store = InMemoryLeaseStore::new();
+        let task_id = TaskId::new();
+
+        let result = store.get(task_id).await.unwrap();
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_store_update_fails_on_missing_lease() {
+        let store = InMemoryLeaseStore::new();
+        let task_id = TaskId::new();
+        let worker_id = WorkerId::new();
+        let lease = Lease::new(task_id, worker_id, Duration::from_secs(10), 0);
+
+        let result = store.update(lease).await;
+        assert!(matches!(result, Err(CoreError::LeaseNotFound)));
+    }
+
+    #[tokio::test]
+    async fn test_active_leases_with_multiple_leases() {
+        let store = InMemoryLeaseStore::new();
+        let manager = LeaseManager::new(store.clone());
+
+        let task_id1 = TaskId::new();
+        let task_id2 = TaskId::new();
+        let task_id3 = TaskId::new();
+        let worker_id = WorkerId::new();
+
+        let lease1 = Lease::new(task_id1, worker_id, Duration::from_secs(10), 0);
+        let lease2 = Lease::new(task_id2, worker_id, Duration::from_secs(10), 0);
+        let lease3 = Lease::new(task_id3, worker_id, Duration::from_secs(10), 0);
+
+        manager.acquire(lease1).await.unwrap();
+        manager.acquire(lease2).await.unwrap();
+        manager.acquire(lease3).await.unwrap();
+
+        let active = store.active_leases().await.unwrap();
+        assert_eq!(active.len(), 3);
+    }
+
+    #[tokio::test]
+    async fn test_active_leases_excludes_expired() {
+        let store = InMemoryLeaseStore::new();
+        let manager = LeaseManager::new(store.clone());
+
+        let task_id1 = TaskId::new();
+        let task_id2 = TaskId::new();
+        let worker_id = WorkerId::new();
+
+        // Create one short-lived lease and one long-lived lease
+        let lease1 = Lease::new(task_id1, worker_id, Duration::from_millis(1), 0);
+        let lease2 = Lease::new(task_id2, worker_id, Duration::from_secs(10), 0);
+
+        manager.acquire(lease1).await.unwrap();
+        manager.acquire(lease2).await.unwrap();
+
+        // Wait for first lease to expire
+        std::thread::sleep(Duration::from_millis(10));
+
+        let active = store.active_leases().await.unwrap();
+        // Both should still be in active_leases (active_leases returns all, expired is handled by collect_expired)
+        assert_eq!(active.len(), 2);
+
+        // But collect_expired should find the expired one
+        let expired = manager.collect_expired().await.unwrap();
+        assert_eq!(expired.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_collect_expired_marks_state() {
+        let store = InMemoryLeaseStore::new();
+        let manager = LeaseManager::new(store.clone());
+
+        let task_id = TaskId::new();
+        let worker_id = WorkerId::new();
+        let lease = Lease::new(task_id, worker_id, Duration::from_millis(1), 0);
+
+        manager.acquire(lease).await.unwrap();
+        std::thread::sleep(Duration::from_millis(10));
+
+        // Collection finds the expired lease
+        let expired = manager.collect_expired().await.unwrap();
+        assert_eq!(expired.len(), 1);
+        assert_eq!(expired[0].state, LeaseState::Expired);
+
+        // Verify the lease in store is also marked Expired
+        let stored_lease = store.get(task_id).await.unwrap().unwrap();
+        assert_eq!(stored_lease.state, LeaseState::Expired);
+    }
+
+    #[tokio::test]
+    async fn test_lease_store_clone_shares_state() {
+        let store1 = InMemoryLeaseStore::new();
+        let store2 = store1.clone();
+
+        let task_id = TaskId::new();
+        let worker_id = WorkerId::new();
+        let lease = Lease::new(task_id, worker_id, Duration::from_secs(10), 0);
+
+        // Insert via store1
+        store1.insert(lease).await.unwrap();
+
+        // Retrieve via store2 (should have shared DashMap)
+        let retrieved = store2.get(task_id).await.unwrap();
+        assert!(retrieved.is_some());
+        assert_eq!(retrieved.unwrap().task_id, task_id);
+    }
+
+    #[tokio::test]
+    async fn test_manager_clone_preserves_functionality() {
+        let store = InMemoryLeaseStore::new();
+        let manager1 = LeaseManager::new(store.clone());
+        let manager2 = manager1.clone();
+
+        let task_id = TaskId::new();
+        let worker_id = WorkerId::new();
+        let lease = Lease::new(task_id, worker_id, Duration::from_secs(10), 0);
+
+        // Acquire via manager1
+        manager1.acquire(lease).await.unwrap();
+
+        // Complete via manager2 (should operate on same store)
+        manager2.complete(task_id).await.unwrap();
+
+        // Verify state change
+        let result = store.get(task_id).await.unwrap().unwrap();
+        assert_eq!(result.state, LeaseState::Completed);
     }
 }

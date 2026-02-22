@@ -1,378 +1,611 @@
-# KnittingCrab: Distributed Task Scheduling System
+# CLAUDE.md: knittingCrab Project Guide
 
-A Rust-based distributed task scheduling system featuring priority queues, lease management, SSH health monitoring, and worker distribution across multiple nodes.
+> This guide helps Claude Code (and human contributors) understand knittingCrab's architecture, conventions, and development workflow. **Reference this before making changes.**
 
 ## Project Overview
 
-KnittingCrab is built as a monorepo with 6 coordinated crates, implementing:
-- **Coordinator**: Centralized task distribution and node management
-- **Workers**: Distributed execution engines with lease-based task guarantees
-- **Scheduler**: Task scheduling with weighted priority support
-- **Transport**: Framed messaging protocol for inter-node communication
-- **Core**: Shared domain models (tasks, priorities, leases, IDs)
-- **Node**: Main entry point for worker nodes
+**knittingCrab** is a resource-aware local task scheduler for AI agent workloads, optimized for macOS M4 Max. It transforms chaotic agent swarms into deterministic "factory lines" by providing:
 
-**Total LOC**: ~69,000 lines of Rust | **Test Count**: 26+ tests per major module
+- Priority-based task queuing
+- Resource-aware allocation (CPU, RAM, Metal slots)
+- Lease-based concurrency control
+- Graceful process management with signal handling
+- Remote session execution via aivcs.local
+
+**Why "knittingCrab"?** The scheduler orchestrates many concurrent threads of work (like knitting) with crustacean-style lateral thinking—sideways approaches to deadlock and resource contention.
 
 ---
 
-## Quick Start
+## Core Philosophy
 
-### Build
-```bash
-# Build entire workspace
-cargo build --release
+### 1. **TDD-First Development**
+Every feature **must** have tests written before implementation:
+- Unit tests verify isolated logic (e.g., lease state machine)
+- Component tests verify trait contracts (e.g., ProcessExecutor)
+- Integration tests verify real-world behavior (e.g., actual subprocess spawning)
+- Tests are deterministic and never flaky (no sleep-based timing)
 
-# Build specific crate
-cargo build -p knitting-crab-coordinator
+### 2. **Zero Unsafe Code Policy** (Except Where Necessary)
+- No unsafe code in task logic, queuing, or trait implementations
+- Process group setup (`setpgid`) requires unsafe; document with `// SAFETY: ...` comments
+- Every unsafe block requires justification and is reviewed carefully
+
+### 3. **No Warnings Policy**
+- All code compiles with `RUSTFLAGS="-D warnings"`
+- All code passes `cargo clippy -- -D warnings`
+- No suppression of warnings except with explicit justification
+
+### 4. **Trait-Based Abstraction**
+- Concrete implementations are swappable (e.g., FakeWorker for RealProcessExecutor)
+- Every external dependency is hidden behind a trait boundary
+- This enables testing without side effects (no network calls, no disk I/O in unit tests)
+
+### 5. **Resource Determinism**
+- Same inputs → same outputs (no randomness except where explicitly needed)
+- Idempotent operations where possible (e.g., lease attach-or-create semantics)
+- Session names generated deterministically: `aivcs__{repo}__{work_id}__{role}`
+
+---
+
+## Workspace Structure
+
+```
+knittingCrab/
+├── CLAUDE.md                          # ← You are here
+├── README.md                          # Project overview & quick start
+├── IMPLEMENTATION.md                  # Architecture deep-dive (Epic 2 detail)
+├── CHANGELOG.md                       # Release notes & breaking changes
+├── CI.md                             # CI/CD configuration & workflows
+├── Cargo.toml                        # Workspace definition
+├── Cargo.lock                        # Pinned dependencies
+│
+├── .github/
+│   └── workflows/
+│       └── ci.yml                    # GitHub Actions: build, test, clippy, security audit, Apple Silicon
+│
+├── .pre-commit-config.yaml           # Pre-commit hooks: rustfmt, clippy
+├── .githooks/                        # Local git hooks
+│
+├── crates/
+│   ├── core/                         # Shared types, traits, error types (Epic 1 boundary)
+│   │   ├── src/
+│   │   │   ├── lib.rs               # Public exports
+│   │   │   ├── error.rs             # SchedulerError, SessionError
+│   │   │   ├── lease.rs             # Lease state machine
+│   │   │   ├── work_item.rs         # TaskState, WorkItem, Priority
+│   │   │   └── ...                  # Circuit breaker, backpressure, timeout
+│   │   └── tests/                   # Unit tests
+│   │
+│   ├── worker/                       # Worker runtime (Epic 2 complete)
+│   │   ├── src/
+│   │   │   ├── lib.rs               # Public exports
+│   │   │   ├── process.rs           # ProcessHandle, signal handling
+│   │   │   ├── worker_runtime.rs    # Main task orchestration
+│   │   │   ├── fake_worker.rs       # Test double (no OS processes)
+│   │   │   ├── cancel_token.rs      # Graceful cancellation
+│   │   │   └── retry.rs             # Exponential backoff
+│   │   └── tests/                   # Component & integration tests
+│   │
+│   ├── scheduler/                    # Task queue stub (for testing)
+│   │   ├── src/
+│   │   │   └── lib.rs
+│   │   └── tests/
+│   │
+│   └── aivcs-session/                # Remote session manager (Phase 2 new)
+│       ├── src/
+│       │   ├── lib.rs               # Public API
+│       │   ├── session.rs           # SessionConfig, deterministic naming
+│       │   ├── remote.rs            # RemoteSessionManager, SSH/tmux
+│       │   ├── main.rs              # CLI (attach, list, kill)
+│       │   └── error.rs             # SessionError
+│       └── tests/
+│
+├── src/                              # (Old location, being migrated to crates/)
+│   └── ...                           # Legacy code; prefer crates/ structure
+│
+└── tests/                            # Integration tests
+    └── ...
 ```
 
-### Test
+---
+
+## Key Architecture Patterns
+
+### Lease System (Prevents Duplicate Execution)
+```
+WorkItem → [Queued] → (dequeue) → [Scheduled] → (acquire lease) → [Running]
+                          ↑                                              ↓
+                          ←─── (retry) ←─ (fail) ←─ (release lease) ←─
+```
+
+**Key invariant**: A task can only execute if:
+1. It's dequeued
+2. Its dependencies are satisfied
+3. It acquires a unique lease (no other worker holds it)
+
+**Implementation**: `LeaseManager` holds a `DashMap<task_id, Lease>` with heartbeat renewal.
+
+### Process Execution Flow
+```rust
+RealProcessExecutor::execute(cmd) {
+    1. Create process group: setpgid(0, 0)       // Allows killpg()
+    2. Spawn child process
+    3. Drive with select! {
+        - Process completion (wait_on_child)
+        - Cancellation signal (recv_cancel_signal)
+    }
+    4. On signal: send SIGTERM, wait grace period, SIGKILL if needed
+    5. Capture exit code, stdout, stderr
+}
+```
+
+### Trait-Based Testing (No Side Effects)
+```rust
+// Production code
+impl WorkerRuntime {
+    fn new(queue: Arc<dyn Queue>, executor: Arc<dyn ProcessExecutor>) -> Self { ... }
+}
+
+// Test code
+let fake_queue = Arc::new(FakeQueue::with_tasks(vec![...]));
+let fake_executor = Arc::new(FakeProcessExecutor::success(0));
+let runtime = WorkerRuntime::new(fake_queue, fake_executor);
+runtime.run().await;  // No OS processes, no network calls
+```
+
+### Deterministic Session Naming
+```
+Input:  repo_name="my-repo", work_id="task-123", role=Agent
+Output: "aivcs__my-repo__task-123__agent"
+
+Rules:
+- lowercase everything
+- replace invalid chars with '_'
+- forbid ".." and "/" (path traversal prevention)
+- escape shell metacharacters before SSH
+```
+
+---
+
+## Development Workflow
+
+### Before You Code: Check the Plan
+1. **Is there a related GitHub issue?** Read it fully.
+2. **Is there an open PR?** Check its status and avoid duplicating work.
+3. **Have you reviewed the relevant docs?** (README.md, IMPLEMENTATION.md, CLAUDE.md)
+4. **Do you understand the test strategy?** (See "Testing Requirements" below)
+
+### Creating a Feature
+1. **Create a test first** (TDD):
+   ```rust
+   #[test]
+   fn my_feature_works() {
+       // Arrange
+       // Act
+       // Assert
+   }
+   ```
+
+2. **Run the test** to verify it fails:
+   ```bash
+   cargo test my_feature --lib
+   ```
+
+3. **Implement the feature** (minimal code to pass the test)
+
+4. **Add more tests** for edge cases:
+   - Happy path
+   - Error conditions
+   - Boundary conditions
+   - Integration (if trait-based)
+
+5. **Verify no warnings**:
+   ```bash
+   RUSTFLAGS="-D warnings" cargo test --all
+   cargo clippy --all -- -D warnings
+   cargo fmt --all
+   ```
+
+6. **Run pre-commit hooks**:
+   ```bash
+   pre-commit run --all-files
+   ```
+
+7. **Create a PR** with:
+   - Clear title describing the feature
+   - Reference to related issue (#37, #38, etc.)
+   - Summary of what changed and why
+   - Test counts (e.g., "25 tests passing")
+
+### Making a Bug Fix
+1. **Write a test that reproduces the bug** (fails before fix)
+2. **Fix the bug** (minimal change)
+3. **Verify the test now passes**
+4. **Check no other tests broke**:
+   ```bash
+   cargo test --all
+   ```
+
+### Refactoring
+1. **Ensure all tests pass** before refactoring:
+   ```bash
+   cargo test --all
+   ```
+
+2. **Refactor incrementally** (small, focused changes)
+
+3. **Run tests after each change**:
+   ```bash
+   cargo test --all
+   ```
+
+4. **If a test breaks**, either:
+   - Fix your refactor to preserve behavior, OR
+   - Update the test if the behavior change is intentional
+   - Document why in the commit message
+
+---
+
+## Testing Requirements
+
+### What Must Be Tested?
+
+| Category | Examples | Min Tests |
+|----------|----------|-----------|
+| **State machines** | Lease lifecycle, task state transitions | 5+ |
+| **Retry logic** | Backoff, max attempts, code filtering | 3+ |
+| **Traits** | Queue, ProcessExecutor, LeaseStore | 3+ per trait |
+| **Edge cases** | Empty input, max size, timeout, cancellation | 5+ |
+| **Error conditions** | Path traversal, shell injection, invalid role | 5+ |
+
+### Test Naming Convention
+
+```rust
+// ✅ Good
+#[test]
+fn lease_prevents_duplicate_execution() { ... }
+
+#[test]
+fn session_name_forbids_path_traversal() { ... }
+
+// ❌ Bad
+#[test]
+fn test_1() { ... }
+
+#[test]
+fn it_works() { ... }
+```
+
+### Test Organization
+
+```rust
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_helpers::*;
+
+    // Group related tests with comments
+    // ===== Lease Lifecycle Tests =====
+
+    #[test]
+    fn acquire_prevents_duplicate() { ... }
+
+    #[test]
+    fn release_frees_slot() { ... }
+
+    // ===== Retry Logic Tests =====
+
+    #[test]
+    fn backoff_increases_exponentially() { ... }
+}
+```
+
+### Running Tests
+
 ```bash
-# Run all tests with strict warnings
-RUSTFLAGS="-D warnings" cargo test --all
+# All tests
+cargo test --all
 
-# Test specific crate (coordinator example)
-cargo test -p knitting-crab-coordinator
+# Specific crate
+cargo test -p knitting-crab-worker
 
-# Test specific module
-cargo test -p knitting-crab-coordinator ssh_health
-cargo test -p knitting-crab-coordinator node_registry
+# Specific test
+cargo test my_feature --lib
 
-# Run with output
+# With verbose output
 cargo test --all -- --nocapture
 
-# Run single test
-cargo test -p knitting-crab-coordinator health_starts_healthy_after_register -- --exact
+# With backtrace on panic
+RUST_BACKTRACE=1 cargo test --all
+
+# Strict: no warnings allowed
+RUSTFLAGS="-D warnings" cargo test --all
 ```
 
-### Lint & Format
-```bash
-# Clippy with strict warnings
-RUSTFLAGS="-D warnings" cargo clippy -p knitting-crab-coordinator -- -D warnings
+---
 
-# Format check
+## Code Quality Standards
+
+### Clippy
+```bash
+# Check for warnings
+cargo clippy --all -- -D warnings
+
+# Fix automatically (when possible)
+cargo clippy --fix --all
+```
+
+### Formatting
+```bash
+# Check format
 cargo fmt --all -- --check
 
 # Auto-format
 cargo fmt --all
 ```
 
----
-
-## Project Structure
-
-```
-crates/
-├── core/              # Shared types: Priority, TaskDescriptor, Lease, WorkerId, TaskId
-├── coordinator/       # Central hub for task distribution & node health
-├── worker/           # Distributed execution engines
-├── scheduler/        # Task scheduling with priority queues
-├── transport/        # Binary framing protocol (TCP/FramedTransport)
-└── node/             # Worker node runtime entry
-```
-
-### Key Directories
-- `crates/coordinator/src/`: Server, node registry, SSH health monitoring, state
-- `crates/core/src/`: Domain models, priority system, lease management
-- `crates/scheduler/src/`: Priority queue and scheduling logic
-- `crates/worker/src/`: Lease manager, task execution, heartbeat protocol
-
----
-
-## Test Suite Reference
-
-### Coverage by Crate
-
-#### `knitting-crab-coordinator` (26 tests)
-Tests for distributed task coordination, node health, and cache management.
-
-**SSH Health Monitoring** (8 tests: `ssh_health::tests::*`)
-- `healthy_probe_records_no_failures` - Successful TCP probes reset failure count
-- `single_failure_marks_degraded` - 1 failure → Degraded state
-- `three_failures_marks_unhealthy` - 3 consecutive failures → Unhealthy state
-- `success_after_failures_resets_to_healthy` - Success resets counter to 0
-- `probe_all_visits_every_registered_node` - All nodes probed each interval
-- `probe_all_skips_node_removed_mid_scan` - Gracefully handles mid-scan removals
-- `unhealthy_node_not_returned_in_unhealthy_if_reset` - Reset removes from unhealthy list
-- `concurrent_probe_all_does_not_double_count` - Race-safe concurrent probes
-
-**Node Registry Health** (4 tests: `node_registry::tests::health_*`)
-- `health_starts_healthy_after_register` - New nodes are Healthy (0 failures)
-- `degraded_after_one_probe_failure` - 1+ failures trigger Degraded
-- `unhealthy_after_three_probe_failures` - 3+ failures trigger Unhealthy
-- `reset_to_healthy_after_probe_success` - Successful probe resets to Healthy
-
-**Node Registry Core** (4 tests)
-- `register_node` - Register adds node to registry
-- `heartbeat_updates_last_seen` - Heartbeats refresh last_seen timestamp
-- `stale_nodes_detection` - Nodes timeout after threshold
-- `remove_node` - Removal cleans up all tracking data
-
-**Cache Index** (3 tests)
-- `announce_and_query` - Cache announce/query roundtrip
-- `query_nonexistent_returns_empty` - Missing keys return empty
-- `evict_node_removes_entries` - Node eviction cascades to cache
-
-**Server & State** (7 tests)
-- `register_node_returns_ok` - RegisterNode request succeeds
-- `dequeue_empty_returns_none` - Empty queue returns None
-- `insert_lease_succeeds` - Lease creation and duplicate detection
-- `query_cache_returns_locations` - Cache query routing
-- `state_creation` - State initialization
-- `enqueue_and_dequeue_task` - Task lifecycle
-
-#### `knitting-crab-core` (10 tests)
-- Priority system, task descriptors, lease management
-- **Doc tests**: 6 examples (ignored—for documentation)
-
-#### `knitting-crab-scheduler` (3 tests)
-- Scheduler trait implementation
-
-#### `knitting-crab-worker` (18 tests)
-- Lease manager, heartbeat protocol, worker runtime
-
-#### `knitting-crab-transport` (1 test)
-- Framed transport protocol
-
-#### `knitting-crab-node` (0 tests)
-- Integration layer (uses manual testing or acceptance tests)
-
-**Total: 40+ unit tests**
-
----
-
-## Testing Strategy
-
-### Unit Tests (Inline `#[cfg(test)]`)
-All modules have inline test submodules. Example from `ssh_health.rs`:
-
-```rust
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    struct FakeProbe { /* test impl */ }
-
-    #[test]
-    fn test_name() { /* arrange, act, assert */ }
-}
-```
-
-### Test Patterns Used
-1. **Dependency Injection**: `NodeProbe` trait allows `FakeProbe` for isolation
-2. **Arc<DashMap>** for thread-safe, concurrent test state
-3. **Tokio runtime** spawning for async test execution
-4. **Assertion by state inspection**: Direct registry/queue checks post-action
-
-### Running Tests
-
-**By crate:**
+### Pre-Commit Hooks
 ```bash
-cargo test -p knitting-crab-coordinator
-cargo test -p knitting-crab-worker
-cargo test -p knitting-crab-core
+# Install (one-time)
+pip install pre-commit
+pre-commit install
+
+# Run manually
+pre-commit run --all-files
 ```
 
-**By module:**
+### Security Audit
 ```bash
-cargo test -p knitting-crab-coordinator ssh_health --lib
-cargo test -p knitting-crab-coordinator node_registry --lib
-```
-
-**By test name pattern:**
-```bash
-cargo test health_              # Matches all health_* tests
-cargo test probe_all            # Matches all probe_all* tests
-```
-
-**Strict mode (fail on warnings):**
-```bash
-RUSTFLAGS="-D warnings" cargo test --all
+cargo audit
 ```
 
 ---
 
-## Key Architectures
+## Design Decisions & Rationale
 
-### SSH Health Monitoring (`coordinator/src/ssh_health.rs`)
-Active TCP probe monitor runs every 30s per node.
-- **NodeHealth enum**: Healthy → Degraded (1 failure) → Unhealthy (3 failures)
-- **Probe success resets** counter to 0 (fast recovery)
-- **Unhealthy nodes** auto-evicted, leases requeued via `node_reaper_loop`
-- **Trait-based**: `NodeProbe` for production TCP vs. test fakes
+### Why DashMap for Leases?
+- **Lock-free concurrent hashmap** (better than `tokio::sync::Mutex`)
+- Allows multiple readers without blocking async tasks
+- O(1) lookup and insertion
+- Reference: `crates/core/src/lease.rs`
 
-### Priority System (`core/src/priority.rs`)
-Four-tier priority: Critical (3), High (2), Normal (1), Low (0)
-- Supports **priority inversion detection** and degradation modes
-- **Weighted round-robin** scheduling (50/30/15/5 distribution)
+### Why Process Groups (setpgid)?
+- Creates isolated process groups so `killpg()` reaches all descendants
+- Required on macOS for reliable signal delivery
+- Prevents child processes from escaping termination
+- Reference: `crates/worker/src/process.rs`
 
-### Lease Management (`worker/src/lease_manager.rs`)
-Task execution guarantees via distributed leases:
-- **Lease acquire** on task start
-- **Periodic heartbeat** extends lease TTL
-- **On timeout**: task requeued with incremented attempt counter
-- **Coordinator tracking**: all active leases visible for eviction logic
+### Why FakeWorker Test Double?
+- Enables integration testing without spawning OS processes
+- No flaky timing issues (no sleep, deterministic)
+- Configurable task behaviors (Succeed, Fail, Hang, Crash)
+- Reference: `crates/worker/src/fake_worker.rs`
 
-### Node Registry (`coordinator/src/node_registry.rs`)
-Tracks registered worker nodes with dual timeout mechanisms:
-1. **Passive**: `heartbeat()` updates `last_seen`; stale timeout after 60s
-2. **Active**: `SshHealthMonitor` TCP probes every 30s; 3 failures = unhealthy
+### Why Trait-Based Architecture?
+- Swappable implementations (Real vs Fake)
+- Testable without side effects (no network, disk I/O in unit tests)
+- Future-proof for distributed execution (HTTP backends, database backends)
+- Reference: `crates/core/src/lib.rs` (trait exports)
 
----
-
-## Workflow Commands
-
-### Development Loop
-```bash
-# 1. Make changes to a module (e.g., ssh_health.rs)
-# 2. Run module tests to validate
-cargo test -p knitting-crab-coordinator ssh_health -- --nocapture
-
-# 3. Run full crate tests
-cargo test -p knitting-crab-coordinator --lib
-
-# 4. Lint & format
-cargo fmt --all
-RUSTFLAGS="-D warnings" cargo clippy -p knitting-crab-coordinator -- -D warnings
-
-# 5. Full workspace test
-RUSTFLAGS="-D warnings" cargo test --all
-```
-
-### Adding a New Test
-```rust
-// In the module's #[cfg(test)] section:
-#[test]
-fn new_test_name() {
-    // Arrange
-    let registry = NodeRegistry::new();
-
-    // Act
-    registry.record_probe_failure(&id);
-
-    // Assert
-    assert_eq!(registry.health_status(&id), NodeHealth::Degraded);
-}
-```
-
-### Creating a New Module with Tests
-1. Create `src/new_module.rs`
-2. Add module declaration to `lib.rs`: `pub mod new_module`
-3. Add module export if public API needed
-4. Write inline `#[cfg(test)] mod tests { ... }`
-5. Run: `cargo test -p <crate> new_module --lib`
-
----
-
-## Git Workflow
-
-### Branch Naming
-- **Feature**: `feature/short-description`
-- **Epic**: `epic/epic-number-short-description`
-- **Fix**: `fix/issue-number-short-description`
-- **Docs**: `docs/topic`
-
-### Pull Request Checklist
-- [ ] All tests pass: `cargo test --all`
-- [ ] No clippy warnings: `RUSTFLAGS="-D warnings" cargo clippy -p <crate> -- -D warnings`
-- [ ] Code formatted: `cargo fmt --all`
-- [ ] PR description includes: what, why, testing strategy
-- [ ] Commits include: `Co-Authored-By: Claude Haiku 4.5 <noreply@anthropic.com>`
-
-### Base Branch
-**Always create PRs against `develop` branch** (not main)
-```bash
-git checkout develop
-git pull origin develop
-git checkout -b feature/your-feature
-# ... make changes ...
-git push -u origin feature/your-feature
-# Create PR: base branch = develop
-```
+### Why Deterministic Session Names?
+- Same inputs always produce same tmux session
+- Enables idempotent attach-or-create semantics
+- Prevents session name collisions
+- Security: forbids path traversal and shell injection
+- Reference: `crates/aivcs-session/src/session.rs`
 
 ---
 
 ## Common Tasks
 
-### Debug a Failing Test
-```bash
-# Run test with backtrace
-RUST_BACKTRACE=1 cargo test -p knitting-crab-coordinator health_starts_healthy -- --nocapture
+### Add a New Test
+```rust
+#[test]
+fn my_test_name() {
+    // Arrange
+    let input = ...;
 
-# Run test with debug output
-RUST_LOG=debug cargo test -p knitting-crab-coordinator -- --nocapture
+    // Act
+    let result = function_under_test(input);
+
+    // Assert
+    assert_eq!(result, expected_value);
+}
 ```
 
-### Profile Memory/Performance
-```bash
-# Build release profile
-cargo build --release -p knitting-crab-coordinator
+### Add a New Trait
+1. Define in `crates/core/src/lib.rs`
+2. Export from `crates/core/src/lib.rs`
+3. Add a FakeImpl for testing
+4. Add at least 3 unit tests
+5. Create a component test using FakeImpl
 
-# Run with perf (macOS: use Instruments)
-cargo build --release
-time ./target/release/coordinator
+### Add a New Crate
+```bash
+cd crates
+cargo new my-feature
 ```
 
-### Update Dependencies
-```bash
-# Check for outdated deps
-cargo outdated
-
-# Update workspace deps (use workspace Cargo.toml)
-# Edit Cargo.toml [workspace.dependencies] section
-cargo update
+Then update `Cargo.toml` in root:
+```toml
+[workspace]
+members = [
+    "crates/core",
+    "crates/worker",
+    "crates/scheduler",
+    "crates/my-feature",  # Add this
+]
 ```
 
-### Clean Build
+### Fix a Clippy Warning
 ```bash
-# Remove build artifacts
-cargo clean
+# Identify the warning
+cargo clippy --all -- -D warnings
 
-# Rebuild
-cargo build --all
+# Let clippy try to fix it
+cargo clippy --fix --all
+
+# Manually verify and commit
+git diff
+cargo test --all
+```
+
+### Update Documentation
+- **README.md**: Quick start, project overview, status
+- **IMPLEMENTATION.md**: Architecture deep-dive, design decisions
+- **CLAUDE.md**: This file (development guide)
+- **Inline docs**: Doc comments for all public APIs
+  ```rust
+  /// Acquires an exclusive lease for a task.
+  ///
+  /// # Returns
+  /// - `Ok(Lease)` if the lease was acquired
+  /// - `Err(LeaseError::Conflict)` if already held
+  pub fn acquire(&self, task_id: u64) -> Result<Lease, LeaseError> { ... }
+  ```
+
+---
+
+## Known Issues & Limitations
+
+### Current Limitations
+1. **InMemoryLeaseStore**: Not persistent (lost on restart)
+2. **StubScheduler**: Simple VecDeque (no priority, no persistence)
+3. **Log sequence tracking**: Resets per task (not global)
+4. **Process groups**: Unix-only (guarded with `#[cfg(unix)]`)
+5. **Resource monitoring**: Stubbed for Epic 1 boundary
+6. **Apple Silicon CI**: Occasional transient timing flakes in `test_half_open_transition`
+
+### Known Flakes
+- **Apple Silicon Compatibility check**: Sometimes fails with `test_half_open_transition` (circuit breaker timing)
+  - **Workaround**: Push an empty commit to rerun CI
+  - **Root cause**: Timing-sensitive test on CI macOS (not in PR code)
+  - **Status**: Being investigated; does not block merges
+
+---
+
+## Git & GitHub Workflow
+
+### Creating a PR
+1. **Branch naming**: `feature/description` or `bugfix/description`
+2. **Base branch**: `develop` (for new features), `main` (for hotfixes)
+3. **Commit messages**: Clear and descriptive
+   ```
+   feat: Add deterministic session naming for aivcs-session
+
+   Implements SessionConfig with validation and sanitization.
+   - forbids path traversal (.., /)
+   - replaces invalid chars with underscore
+   - enforces lowercase naming
+   - deterministic: same inputs → same output
+
+   Adds 22 unit tests covering all edge cases.
+   ```
+
+4. **PR description**:
+   ```markdown
+   ## Summary
+   Brief description of what changed.
+
+   ## Related Issue
+   Resolves #37
+
+   ## Test Results
+   - 25 tests passing
+   - Zero clippy warnings
+   - All pre-commit hooks pass
+
+   ## Architecture Alignment
+   This implementation satisfies the requirements from #37/#38/#40.
+   ```
+
+### Merging a PR
+1. Ensure **all CI checks pass** (build, test, clippy, security audit, Apple Silicon)
+2. Get **at least 1 approval** from a maintainer
+3. **Squash or rebase** as appropriate
+4. **Delete the branch** after merge
+
+---
+
+## Performance Considerations
+
+| Component | Complexity | Notes |
+|-----------|-----------|-------|
+| Lease lookup | O(1) | DashMap hash lookup |
+| Task dequeue | O(1) | VecDeque pop front (for now) |
+| Task acquire | O(1) | DashMap insert |
+| Process spawn | O(1) | Command::new + spawn |
+| Heartbeat | O(n) | Where n = active leases (every 5s) |
+| Reaper | O(n) | Where n = expired leases (every 10s) |
+
+### Optimization Opportunities
+- Replace VecDeque with priority queue (for Epic 1)
+- Persistent lease store (database-backed, for production)
+- Event sink batching (reduce allocations)
+
+---
+
+## Debugging Tips
+
+### Enable Backtrace
+```bash
+RUST_BACKTRACE=1 cargo test --all
+RUST_BACKTRACE=full cargo test --all
+```
+
+### Print Debug Info
+```rust
+// Use dbg! for quick debugging
+let x = dbg!(expensive_function());
+
+// Use eprintln! for logging
+eprintln!("Task state: {:?}", task.state);
+```
+
+### Run a Single Test with Output
+```bash
+cargo test my_test -- --nocapture --exact
+```
+
+### Check Test Code Structure
+```bash
+# List all test names
+cargo test --all -- --list
 ```
 
 ---
 
-## Troubleshooting
+## Resources & References
 
-### `error[E0432]: unresolved import`
-- Add missing crate to `Cargo.toml` dependencies
-- Ensure workspace dependencies are declared in workspace root
-
-### Test fails with `panic: ...`
-- Check test assertion failure message
-- Run test with `--nocapture` to see println! output
-- Use `RUST_BACKTRACE=1` for full stack trace
-
-### Clippy warnings preventing build
-- Run: `RUSTFLAGS="-D warnings" cargo clippy -p <crate> -- -D warnings`
-- Fix indicated warnings or refactor code
-- Never use `#![allow(warnings)]` unless explicitly justified
-
-### Workspace test count mismatch
-- Some tests may be ignored (e.g., doc-tests)
-- Run: `cargo test --all -- --include-ignored` to run all
-- Check `#[ignore]` attributes in test code
+- **[Tokio Runtime Documentation](https://tokio.rs/)**: Async/await patterns
+- **[Signal Handling on Unix](https://www.man7.org/linux/man-pages/man2/signal.2.html)**: setpgid, SIGTERM, SIGKILL
+- **[macOS Process Management](https://developer.apple.com/documentation/os/process_management)**: M4 Max specifics
+- **[Rust Testing Guide](https://doc.rust-lang.org/book/ch11-00-testing.html)**: Test organization & conventions
+- **[Interior Mutability Patterns](https://doc.rust-lang.org/reference/interior-mutability.html)**: Arc, RwLock, DashMap
 
 ---
 
-## Resources
+## Contributing
 
-- **Rust Documentation**: https://doc.rust-lang.org/
-- **Tokio Async Runtime**: https://tokio.rs/
-- **DashMap Concurrent HashMap**: https://docs.rs/dashmap/
-- **Thiserror Error Handling**: https://docs.rs/thiserror/
-- **Clippy Lints**: https://doc.rust-lang.org/clippy/
+We welcome contributions! Please:
+
+1. **Read this guide first** ← You are here
+2. **Check open issues** for good first tasks
+3. **Write tests first** (TDD)
+4. **Ensure no clippy warnings**
+5. **Run pre-commit hooks**
+6. **Create a PR** with clear description
+7. **Respond to feedback** promptly
 
 ---
 
-## License & Attribution
+## Questions?
 
-KnittingCrab is developed as an educational project demonstrating distributed systems concepts in Rust.
+- **Architecture questions**: See IMPLEMENTATION.md
+- **Specific crate questions**: Check inline documentation in `crates/*/src/lib.rs`
+- **Git/GitHub questions**: Ask in the PR or issue
+- **General questions**: Open a GitHub issue
 
-All tests use standard Rust testing conventions and are verified with:
-- `cargo test` (unit tests)
-- `cargo clippy` (linting)
-- `cargo fmt` (formatting)
+---
+
+**Last updated**: 2026-02-22 | **Reviewer**: Claude Code TDD-first verification

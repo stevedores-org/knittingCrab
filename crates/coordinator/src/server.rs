@@ -210,7 +210,9 @@ impl CoordinatorServer {
                 // Requeue active leases for this node
                 if let Ok(leases) = state.active_leases().await {
                     for lease in leases {
-                        let _ = state.queue.requeue(lease.task_id, lease.attempt + 1).await;
+                        if lease.worker_id == worker_id {
+                            let _ = state.queue.requeue(lease.task_id, lease.attempt + 1).await;
+                        }
                     }
                 }
                 state.node_registry.remove(&worker_id);

@@ -180,6 +180,26 @@ impl crate::worker_runtime::ProcessExecutor for FakeWorker {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cancel_token::CancelToken;
+    use crate::process::SpawnParams;
+    use crate::worker_runtime::ProcessExecutor;
+
+    fn make_task(task_id: TaskId) -> TaskDescriptor {
+        TaskDescriptor {
+            task_id,
+            command: vec!["echo".to_string()],
+            working_dir: std::path::PathBuf::from("/tmp"),
+            env: Default::default(),
+            resources: knitting_crab_core::resource::ResourceAllocation::default(),
+            policy: knitting_crab_core::RetryPolicy::default(),
+            attempt: 0,
+            is_critical: false,
+            priority: knitting_crab_core::Priority::Normal,
+            dependencies: vec![],
+        }
+    }
+
+    // ===== Existing Tests =====
 
     #[test]
     fn test_fake_worker_queue() {
@@ -194,6 +214,7 @@ mod tests {
             attempt: 0,
             is_critical: false,
             priority: knitting_crab_core::Priority::Normal,
+            dependencies: vec![],
         };
 
         worker.enqueue(task.clone());
@@ -236,5 +257,262 @@ mod tests {
             assert_eq!(log.seq, i as u64);
             assert_eq!(log.content, format!("log line {}", i));
         }
+    }
+
+    // ===== Queue Trait Tests =====
+
+    #[tokio::test]
+    async fn test_dequeue_empty_returns_none() {
+        let worker = FakeWorker::new();
+        let worker_id = WorkerId::new();
+        let result = worker.dequeue(worker_id).await.unwrap();
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_dequeue_returns_task() {
+        let worker = FakeWorker::new();
+        let task_id = TaskId::new();
+        let task = make_task(task_id);
+        worker.enqueue(task.clone());
+
+        let worker_id = WorkerId::new();
+        let dequeued = worker.dequeue(worker_id).await.unwrap();
+        assert!(dequeued.is_some());
+        assert_eq!(dequeued.unwrap().task_id, task_id);
+    }
+
+    #[tokio::test]
+    async fn test_requeue_updates_attempt() {
+        let worker = FakeWorker::new();
+        let task_id = TaskId::new();
+        let task = make_task(task_id);
+        worker.enqueue(task.clone());
+
+        // Requeue with updated attempt before dequeuing
+        worker.requeue(task_id, 2).await.unwrap();
+
+        let worker_id = WorkerId::new();
+        let dequeued = worker.dequeue(worker_id).await.unwrap().unwrap();
+        assert_eq!(dequeued.attempt, 2);
+    }
+
+    #[tokio::test]
+    async fn test_discard_is_ok() {
+        let worker = FakeWorker::new();
+        let task_id = TaskId::new();
+        let result = worker.discard(task_id).await;
+        assert!(result.is_ok());
+    }
+
+    // ===== ResourceMonitor Trait Tests =====
+
+    #[tokio::test]
+    async fn test_resource_monitor_always_allows() {
+        let worker = FakeWorker::new();
+        let allocation = ResourceAllocation::default();
+
+        let can_alloc = worker.can_allocate(&allocation).await.unwrap();
+        assert!(can_alloc);
+
+        let allocate_result = worker.allocate(&allocation).await;
+        assert!(allocate_result.is_ok());
+
+        let release_result = worker.release(&allocation).await;
+        assert!(release_result.is_ok());
+    }
+
+    // ===== ProcessExecutor FakeBehavior Tests =====
+
+    #[tokio::test]
+    async fn test_execute_succeed_behavior() {
+        let worker = FakeWorker::new();
+        let task_id = TaskId::new();
+        worker.set_behavior(task_id, FakeBehavior::Succeed { delay_ms: 10 });
+
+        let params = SpawnParams {
+            task_id,
+            command: vec!["echo".to_string()],
+            working_dir: std::path::PathBuf::from("/tmp"),
+            env: Default::default(),
+        };
+        let sink = Arc::new(FakeWorker::new()) as Arc<dyn knitting_crab_core::traits::EventSink>;
+        let (_token, guard) = CancelToken::new();
+
+        let outcome = worker.execute(params, sink, guard).await.unwrap();
+        match outcome {
+            knitting_crab_core::retry::ExitOutcome::Success => {
+                // Expected
+            }
+            _ => panic!("Expected Success outcome, got {:?}", outcome),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_execute_fail_behavior() {
+        let worker = FakeWorker::new();
+        let task_id = TaskId::new();
+        worker.set_behavior(
+            task_id,
+            FakeBehavior::Fail {
+                exit_code: 42,
+                delay_ms: 10,
+            },
+        );
+
+        let params = SpawnParams {
+            task_id,
+            command: vec!["echo".to_string()],
+            working_dir: std::path::PathBuf::from("/tmp"),
+            env: Default::default(),
+        };
+        let sink = Arc::new(FakeWorker::new()) as Arc<dyn knitting_crab_core::traits::EventSink>;
+        let (_token, guard) = CancelToken::new();
+
+        let outcome = worker.execute(params, sink, guard).await.unwrap();
+        match outcome {
+            knitting_crab_core::retry::ExitOutcome::FailedWithCode(code) => {
+                assert_eq!(code, 42);
+            }
+            _ => panic!("Expected FailedWithCode(42), got {:?}", outcome),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_execute_crash_behavior() {
+        let worker = FakeWorker::new();
+        let task_id = TaskId::new();
+        worker.set_behavior(task_id, FakeBehavior::Crash);
+
+        let params = SpawnParams {
+            task_id,
+            command: vec!["echo".to_string()],
+            working_dir: std::path::PathBuf::from("/tmp"),
+            env: Default::default(),
+        };
+        let sink = Arc::new(FakeWorker::new()) as Arc<dyn knitting_crab_core::traits::EventSink>;
+        let (_token, guard) = CancelToken::new();
+
+        let outcome = worker.execute(params, sink, guard).await.unwrap();
+        match outcome {
+            knitting_crab_core::retry::ExitOutcome::FailedWithCode(code) => {
+                assert_eq!(code, 1);
+            }
+            _ => panic!("Expected FailedWithCode(1), got {:?}", outcome),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_execute_default_behavior() {
+        let worker = FakeWorker::new();
+        let task_id = TaskId::new();
+        // No behavior set; should use default Succeed { delay_ms: 10 }
+
+        let params = SpawnParams {
+            task_id,
+            command: vec!["echo".to_string()],
+            working_dir: std::path::PathBuf::from("/tmp"),
+            env: Default::default(),
+        };
+        let sink = Arc::new(FakeWorker::new()) as Arc<dyn knitting_crab_core::traits::EventSink>;
+        let (_token, guard) = CancelToken::new();
+
+        let outcome = worker.execute(params, sink, guard).await.unwrap();
+        match outcome {
+            knitting_crab_core::retry::ExitOutcome::Success => {
+                // Expected (default is Succeed)
+            }
+            _ => panic!("Expected Success outcome, got {:?}", outcome),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_execute_pre_cancelled() {
+        let worker = FakeWorker::new();
+        let task_id = TaskId::new();
+
+        let params = SpawnParams {
+            task_id,
+            command: vec!["echo".to_string()],
+            working_dir: std::path::PathBuf::from("/tmp"),
+            env: Default::default(),
+        };
+        let sink = Arc::new(FakeWorker::new()) as Arc<dyn knitting_crab_core::traits::EventSink>;
+        let (token, guard) = CancelToken::new();
+
+        // Cancel before execute
+        token.cancel();
+
+        let outcome = worker.execute(params, sink, guard).await.unwrap();
+        match outcome {
+            knitting_crab_core::retry::ExitOutcome::Success => {
+                // Expected (cancelled early returns Success)
+            }
+            _ => panic!("Expected Success outcome, got {:?}", outcome),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_execute_hang_cancelled() {
+        let worker = FakeWorker::new();
+        let task_id = TaskId::new();
+        worker.set_behavior(task_id, FakeBehavior::Hang);
+
+        let params = SpawnParams {
+            task_id,
+            command: vec!["echo".to_string()],
+            working_dir: std::path::PathBuf::from("/tmp"),
+            env: Default::default(),
+        };
+        let sink = Arc::new(FakeWorker::new()) as Arc<dyn knitting_crab_core::traits::EventSink>;
+        let (token, guard) = CancelToken::new();
+
+        let handle = tokio::spawn({
+            let worker = worker.clone();
+            let sink = sink.clone();
+            async move { worker.execute(params, sink, guard).await }
+        });
+
+        // Give the task time to start hanging
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        // Cancel the token
+        token.cancel();
+
+        let outcome = tokio::time::timeout(Duration::from_secs(5), handle)
+            .await
+            .expect("timeout waiting for handle")
+            .expect("join error")
+            .unwrap();
+
+        match outcome {
+            knitting_crab_core::retry::ExitOutcome::KilledBySignal(signal) => {
+                assert_eq!(signal, 15);
+            }
+            _ => panic!("Expected KilledBySignal(15), got {:?}", outcome),
+        }
+    }
+
+    // ===== Public API Tests =====
+
+    #[test]
+    fn test_get_behavior() {
+        let worker = FakeWorker::new();
+        let task_id_1 = TaskId::new();
+        let task_id_2 = TaskId::new();
+
+        worker.set_behavior(task_id_1, FakeBehavior::Crash);
+
+        let behavior_1 = worker.get_behavior(task_id_1);
+        assert!(behavior_1.is_some());
+        match behavior_1.unwrap() {
+            FakeBehavior::Crash => {
+                // Expected
+            }
+            _ => panic!("Expected Crash behavior"),
+        }
+
+        let behavior_2 = worker.get_behavior(task_id_2);
+        assert!(behavior_2.is_none());
     }
 }
