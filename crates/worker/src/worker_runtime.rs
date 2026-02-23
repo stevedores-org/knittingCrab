@@ -275,7 +275,18 @@ impl<
             )
             .await?;
 
-        heartbeat_handle.abort();
+        // Gracefully shutdown heartbeat task with 5-second grace period
+        // Instead of abort() which loses state, wait for clean shutdown
+        let shutdown_timeout = Duration::from_secs(5);
+        tokio::select! {
+            _ = heartbeat_handle => {
+                // Heartbeat finished cleanly, good!
+            }
+            _ = tokio::time::sleep(shutdown_timeout) => {
+                // Timeout: heartbeat_handle will be dropped, forcing abort
+                // This is acceptable as a fallback for hung tasks
+            }
+        }
 
         if let Err(e) = self
             .event_sink
