@@ -34,6 +34,8 @@ pub struct InversionRecord {
 }
 
 /// Tracks task-to-lock ownership relationships for inversion detection.
+/// This struct is kept for Phase 2 priority inheritance implementation (see ARCHITECTURE.md).
+/// Will be used when implementing lock-aware priority boosting to prevent priority inversion.
 #[allow(dead_code)]
 struct LockOwnership {
     /// Task holding the lock.

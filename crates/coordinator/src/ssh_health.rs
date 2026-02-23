@@ -99,7 +99,7 @@ mod tests {
         fn add_result(&self, hostname: &str, success: bool) {
             self.outcomes
                 .entry(hostname.to_string())
-                .or_insert_with(Vec::new)
+                .or_insert_with(Vec::default)
                 .push(success);
         }
     }

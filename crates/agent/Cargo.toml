@@ -10,6 +10,7 @@ knitting-crab-core = { path = "../core" }
 async-trait = { workspace = true }
 dashmap = { workspace = true }
 tokio = { workspace = true }
+tracing = { workspace = true }
 
 [lints]
 workspace = true

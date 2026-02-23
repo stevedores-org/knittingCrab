@@ -36,6 +36,8 @@ pub struct FakeWorker {
     logs: Arc<Mutex<Vec<LogLine>>>,
     behaviors: Arc<Mutex<std::collections::HashMap<TaskId, FakeBehavior>>>,
     resource_behavior: Arc<Mutex<ResourceBehavior>>,
+    /// Worker ID: used for per-worker debugging and structured tracing (see Issue #70).
+    /// Useful for understanding multi-worker test scenarios and correlating events across workers.
     #[allow(dead_code)]
     worker_id: WorkerId,
 }
@@ -211,6 +213,9 @@ mod tests {
             is_critical: false,
             priority: knitting_crab_core::Priority::Normal,
             dependencies: vec![],
+            goal: None,
+            budget: None,
+            test_gate: None,
         }
     }
 
@@ -230,6 +235,9 @@ mod tests {
             is_critical: false,
             priority: knitting_crab_core::Priority::Normal,
             dependencies: vec![],
+            goal: None,
+            budget: None,
+            test_gate: None,
         };
 
         worker.enqueue(task.clone());

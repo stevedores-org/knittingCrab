@@ -1,4 +1,5 @@
 use dashmap::DashMap;
+use tracing;
 use knitting_crab_core::error::CoreError;
 use knitting_crab_core::ids::TaskId;
 use knitting_crab_core::traits::TaskDescriptor;
@@ -56,6 +57,7 @@ impl BudgetTracker {
         // Update tokens_used
         if let Some(mut entry) = self.entries.get_mut(&task_id) {
             entry.tokens_used += amount;
+            tracing::debug!(task_id = %task_id, tokens = amount, total_used = entry.tokens_used, limit = budget.max_tokens, "charging token budget");
             if entry.tokens_used > budget.max_tokens {
                 return Err(CoreError::BudgetExceeded {
                     reason: format!(
@@ -91,6 +93,7 @@ impl BudgetTracker {
         // Check elapsed time
         if let Some(entry) = self.entries.get(&task_id) {
             let elapsed = entry.started_at.elapsed().as_secs();
+            tracing::debug!(task_id = %task_id, elapsed_secs = elapsed, limit_secs = budget.max_duration_secs, "checking time budget");
             if elapsed > budget.max_duration_secs {
                 return Err(CoreError::BudgetExceeded {
                     reason: format!(
