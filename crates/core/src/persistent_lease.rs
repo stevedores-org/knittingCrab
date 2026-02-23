@@ -235,6 +235,67 @@ impl LeaseStore for SqliteLeaseStore {
             })
             .collect()
     }
+
+    async fn mark_expired_atomically(&self, task_ids: Vec<TaskId>) -> Result<Vec<Lease>, CoreError> {
+        let mut conn = self
+            .conn
+            .lock()
+            .map_err(|e| CoreError::LockPoisoned(format!("lease store: {e}")))?;
+
+        // Use a transaction for atomic check-and-update.
+        // This prevents the TOCTOU race where another connection might modify
+        // the lease between our read and write.
+        let tx = conn
+            .transaction()
+            .map_err(|e| CoreError::Internal(format!("Failed to start transaction: {}", e)))?;
+
+        let mut expired_leases = Vec::new();
+
+        for task_id in task_ids {
+            let task_id_str = task_id.to_string();
+
+            // Fetch the current lease
+            let mut stmt = tx
+                .prepare("SELECT json_data FROM leases WHERE task_id = ? AND state = 'Active'")
+                .map_err(|e| CoreError::Internal(format!("Failed to prepare statement: {}", e)))?;
+
+            let mut rows = stmt
+                .query(params![&task_id_str])
+                .map_err(|e| CoreError::Internal(format!("Failed to query lease: {}", e)))?;
+
+            if let Some(row) = rows
+                .next()
+                .map_err(|e| CoreError::Internal(format!("Failed to fetch row: {}", e)))?
+            {
+                let json: String = row
+                    .get(0)
+                    .map_err(|e| CoreError::Internal(format!("Failed to get json: {}", e)))?;
+
+                // Parse lease to check if expired
+                let lease: Lease = serde_json::from_str(&json)
+                    .map_err(|e| CoreError::Internal(format!("corrupt lease JSON: {e}")))?;
+
+                if lease.is_expired() {
+                    // Update to Expired state atomically
+                    tx.execute(
+                        "UPDATE leases SET state = ?, updated_at = CURRENT_TIMESTAMP WHERE task_id = ? AND state = 'Active'",
+                        params!["Expired", &task_id_str],
+                    )
+                    .map_err(|e| CoreError::Internal(format!("Failed to update lease: {}", e)))?;
+
+                    // Track the expired lease
+                    let mut expired_lease = lease;
+                    expired_lease.state = crate::lease::LeaseState::Expired;
+                    expired_leases.push(expired_lease);
+                }
+            }
+        }
+
+        tx.commit()
+            .map_err(|e| CoreError::Internal(format!("Failed to commit transaction: {}", e)))?;
+
+        Ok(expired_leases)
+    }
 }
 
 #[cfg(test)]

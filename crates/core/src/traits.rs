@@ -64,6 +64,11 @@ pub trait LeaseStore: Send + Sync + 'static {
 
     /// Get all active leases.
     async fn active_leases(&self) -> Result<Vec<Lease>, CoreError>;
+
+    /// Atomically mark expired active leases as Expired (TOCTOU-safe).
+    /// This prevents the race condition where another worker acquires a lease
+    /// between the check and the update. The check-and-update is atomic per task_id.
+    async fn mark_expired_atomically(&self, task_ids: Vec<TaskId>) -> Result<Vec<Lease>, CoreError>;
 }
 
 /// Monitors and allocates system resources.

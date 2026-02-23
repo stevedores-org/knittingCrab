@@ -62,6 +62,10 @@ impl CoordinatorState {
     pub async fn active_leases(&self) -> Result<Vec<Lease>, CoreError> {
         self.lease_store.active_leases().await
     }
+
+    pub async fn mark_expired_atomically(&self, task_ids: Vec<TaskId>) -> Result<Vec<Lease>, CoreError> {
+        self.lease_store.mark_expired_atomically(task_ids).await
+    }
 }
 
 #[cfg(test)]

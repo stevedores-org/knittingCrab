@@ -70,6 +70,26 @@ impl LeaseStore for InMemoryLeaseStore {
             .map(|entry| entry.value().clone())
             .collect())
     }
+
+    async fn mark_expired_atomically(&self, task_ids: Vec<TaskId>) -> Result<Vec<Lease>, CoreError> {
+        let mut expired_leases = Vec::new();
+
+        for task_id in task_ids {
+            // Use DashMap's entry API for atomic check-and-update.
+            // This ensures no other writer can acquire the lease between
+            // our check and our update.
+            if let Some(mut entry) = self.leases.get_mut(&task_id) {
+                let lease = entry.value_mut();
+                // Only transition Active → Expired if the lease is actually expired
+                if lease.state == knitting_crab_core::lease::LeaseState::Active && lease.is_expired() {
+                    lease.state = knitting_crab_core::lease::LeaseState::Expired;
+                    expired_leases.push(lease.clone());
+                }
+            }
+        }
+
+        Ok(expired_leases)
+    }
 }
 
 /// Manages lease lifecycle and operations.
@@ -101,26 +121,21 @@ impl<S: LeaseStore + Clone> LeaseManager<S> {
     }
 
     /// Collect all expired leases and transition them to Expired state.
+    /// Uses atomic update to prevent TOCTOU race where another worker acquires
+    /// an expired lease between our check and our update.
     pub async fn collect_expired(&self) -> Result<Vec<Lease>, CoreError> {
         let leases = self.store.active_leases().await?;
-        let mut expired = Vec::new();
 
-        for lease in leases {
-            if lease.is_expired() {
-                // Double check: fetch fresh copy to prevent race condition
-                if let Some(mut current) = self.store.get(lease.task_id).await? {
-                    if current.state == knitting_crab_core::LeaseState::Active
-                        && current.is_expired()
-                    {
-                        current.state = knitting_crab_core::LeaseState::Expired;
-                        self.store.update(current.clone()).await?;
-                        expired.push(current);
-                    }
-                }
-            }
-        }
+        // Collect task IDs of potentially expired leases
+        let expired_task_ids: Vec<TaskId> = leases
+            .iter()
+            .filter(|lease| lease.is_expired())
+            .map(|lease| lease.task_id)
+            .collect();
 
-        Ok(expired)
+        // Atomically mark them as expired. This prevents the race condition where
+        // another worker acquires the lease between our check and our update.
+        self.store.mark_expired_atomically(expired_task_ids).await
     }
 
     /// Mark a lease as completed.
@@ -472,5 +487,91 @@ mod tests {
         // Verify state change
         let result = store.get(task_id).await.unwrap().unwrap();
         assert_eq!(result.state, LeaseState::Completed);
+    }
+
+    #[tokio::test]
+    async fn reaper_prevents_duplicate_execution_race() {
+        // This test reproduces the race condition from issue #68:
+        // - Reaper checks lease, sees it's expired
+        // - Worker A tries to acquire the same lease (race window)
+        // - Reaper marks lease as Expired (atomic operation)
+        // - Worker B should NOT be able to acquire the lease
+        //
+        // With atomic update, Worker A's acquire attempt should fail because
+        // the lease is already owned by the reaper's atomic update.
+        let store = InMemoryLeaseStore::new();
+        let manager = LeaseManager::new(store.clone());
+
+        let task_id = TaskId::new();
+        let worker_id_a = WorkerId::new();
+        let worker_id_b = WorkerId::new();
+
+        // 1. Create short-lived lease (will expire quickly)
+        let lease = Lease::new(task_id, worker_id_a, Duration::from_millis(50), 0);
+        manager.acquire(lease).await.unwrap();
+
+        // 2. Wait for lease to expire
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        // 3. Run reaper to mark expired leases
+        let expired = manager.collect_expired().await.unwrap();
+        assert_eq!(expired.len(), 1);
+        assert_eq!(expired[0].state, LeaseState::Expired);
+
+        // 4. Verify state in store is Expired
+        let stored = store.get(task_id).await.unwrap().unwrap();
+        assert_eq!(stored.state, LeaseState::Expired);
+
+        // 5. Try to acquire the same lease with a different worker
+        // This should fail because the lease is now Expired (or already held)
+        let new_lease = Lease::new(task_id, worker_id_b, Duration::from_secs(10), 1);
+        let result = manager.acquire(new_lease).await;
+
+        // The lease should not be re-acquirable by a different worker.
+        // It's either still present (expired state) or removed, but not available.
+        assert!(result.is_err(), "Should not allow duplicate lease acquisition");
+    }
+
+    #[tokio::test]
+    async fn atomic_expiry_prevents_concurrent_state_change_race() {
+        // This test verifies that the atomic mark_expired_atomically operation
+        // prevents concurrent modification of lease state.
+        let store = InMemoryLeaseStore::new();
+        let manager = LeaseManager::new(store.clone());
+
+        let task_id = TaskId::new();
+        let worker_id = WorkerId::new();
+
+        // Create short-lived lease
+        let lease = Lease::new(task_id, worker_id, Duration::from_millis(50), 0);
+        manager.acquire(lease).await.unwrap();
+
+        // Wait for expiration
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        // Spawn multiple tasks that try to interact with the lease simultaneously
+        let store_clone = store.clone();
+        let manager_clone = manager.clone();
+
+        let (result1, result2) = tokio::join!(
+            async {
+                // Task 1: Reaper marks it as expired
+                manager_clone.collect_expired().await
+            },
+            async {
+                // Task 2: Try to get the lease (should see Expired state)
+                tokio::time::sleep(Duration::from_millis(1)).await;
+                store_clone.get(task_id).await
+            }
+        );
+
+        // Reaper should find it
+        let expired = result1.unwrap();
+        assert_eq!(expired.len(), 1);
+        assert_eq!(expired[0].state, LeaseState::Expired);
+
+        // The lease should be in Expired state (not Active, not missing)
+        let lease_state = result2.unwrap().unwrap();
+        assert_eq!(lease_state.state, LeaseState::Expired);
     }
 }

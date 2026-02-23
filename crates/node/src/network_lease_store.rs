@@ -91,4 +91,18 @@ impl LeaseStore for NetworkLeaseStore {
             Err(e) => Err(CoreError::Internal(format!("network error: {}", e))),
         }
     }
+
+    async fn mark_expired_atomically(&self, task_ids: Vec<TaskId>) -> Result<Vec<Lease>, CoreError> {
+        let req = CoordinatorRequest::MarkExpiredAtomic { task_ids };
+        match self.conn.request(req).await {
+            Ok(knitting_crab_transport::CoordinatorResponse::Leases(leases)) => Ok(leases),
+            Ok(knitting_crab_transport::CoordinatorResponse::Error(e)) => {
+                Err(CoreError::Internal(e))
+            }
+            Ok(_) => Err(CoreError::Internal(
+                "unexpected response to mark expired atomically".to_string(),
+            )),
+            Err(e) => Err(CoreError::Internal(format!("network error: {}", e))),
+        }
+    }
 }

@@ -163,6 +163,12 @@ impl CoordinatorServer {
                 Ok(leases) => CoordinatorResponse::Leases(leases),
                 Err(e) => CoordinatorResponse::Error(format!("active leases failed: {}", e)),
             },
+            CoordinatorRequest::MarkExpiredAtomic { task_ids } => {
+                match state.mark_expired_atomically(task_ids).await {
+                    Ok(leases) => CoordinatorResponse::Leases(leases),
+                    Err(e) => CoordinatorResponse::Error(format!("mark expired atomically failed: {}", e)),
+                }
+            }
             CoordinatorRequest::EmitEvent { event: _ } => {
                 // Event sink not yet implemented; fire and forget
                 CoordinatorResponse::Ok

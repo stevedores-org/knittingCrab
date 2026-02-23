@@ -40,6 +40,9 @@ pub enum CoordinatorRequest {
         task_id: TaskId,
     },
     ActiveLeases,
+    MarkExpiredAtomic {
+        task_ids: Vec<TaskId>,
+    },
     EmitEvent {
         event: TaskEvent,
     },
