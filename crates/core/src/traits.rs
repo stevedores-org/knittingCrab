@@ -32,6 +32,18 @@ pub struct TaskDescriptor {
     /// Task IDs that must complete before this task can run.
     #[serde(default)]
     pub dependencies: Vec<TaskId>,
+
+    /// Agent intent / human-readable goal (optional).
+    #[serde(default)]
+    pub goal: Option<String>,
+
+    /// Budget constraints for token consumption and time (optional).
+    #[serde(default)]
+    pub budget: Option<crate::agent::AgentBudget>,
+
+    /// Test gate that must pass before task completes (optional).
+    #[serde(default)]
+    pub test_gate: Option<crate::agent::TestGate>,
 }
 
 /// A queue that stores and distributes tasks to workers.
