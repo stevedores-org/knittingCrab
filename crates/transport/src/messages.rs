@@ -57,6 +57,7 @@ pub enum CoordinatorRequest {
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(tag = "type", content = "payload")]
+#[allow(clippy::large_enum_variant)]
 pub enum CoordinatorResponse {
     Ok,
     Dequeued(Option<TaskDescriptor>),

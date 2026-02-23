@@ -211,6 +211,9 @@ mod tests {
             is_critical: false,
             priority: knitting_crab_core::Priority::Normal,
             dependencies: vec![],
+            goal: None,
+            budget: None,
+            test_gate: None,
         }
     }
 
@@ -230,6 +233,9 @@ mod tests {
             is_critical: false,
             priority: knitting_crab_core::Priority::Normal,
             dependencies: vec![],
+            goal: None,
+            budget: None,
+            test_gate: None,
         };
 
         worker.enqueue(task.clone());
