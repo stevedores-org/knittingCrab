@@ -113,15 +113,15 @@ pub struct StarvationMetrics {
 pub struct ResourceConfig {
     pub max_cpu_cores: f32,
     pub max_memory_mb: u32,
-    pub max_metal_slots: u32,
+    pub max_gpu_cores: u32,
 }
 
 impl ResourceConfig {
-    pub fn new(max_cpu_cores: f32, max_memory_mb: u32, max_metal_slots: u32) -> Self {
+    pub fn new(max_cpu_cores: f32, max_memory_mb: u32, max_gpu_cores: u32) -> Self {
         Self {
             max_cpu_cores,
             max_memory_mb,
-            max_metal_slots,
+            max_gpu_cores,
         }
     }
 }
@@ -132,7 +132,7 @@ struct ResourcePool {
     config: ResourceConfig,
     used_cpu: f32,
     used_memory_mb: u32,
-    used_metal_slots: u32,
+    used_gpu_cores: u32,
 }
 
 impl ResourcePool {
@@ -141,7 +141,7 @@ impl ResourcePool {
             config,
             used_cpu: 0.0,
             used_memory_mb: 0,
-            used_metal_slots: 0,
+            used_gpu_cores: 0,
         }
     }
 
@@ -149,21 +149,21 @@ impl ResourcePool {
     fn can_fit(&self, req: &ResourceAllocation) -> bool {
         self.used_cpu + req.cpu_cores <= self.config.max_cpu_cores
             && self.used_memory_mb + req.memory_mb <= self.config.max_memory_mb
-            && self.used_metal_slots + req.metal_slots <= self.config.max_metal_slots
+            && self.used_gpu_cores + req.gpu_cores <= self.config.max_gpu_cores
     }
 
     /// Allocate resources from the pool.
     fn allocate(&mut self, req: &ResourceAllocation) {
         self.used_cpu += req.cpu_cores;
         self.used_memory_mb += req.memory_mb;
-        self.used_metal_slots += req.metal_slots;
+        self.used_gpu_cores += req.gpu_cores;
     }
 
     /// Release resources back to the pool.
     fn release(&mut self, req: &ResourceAllocation) {
         self.used_cpu = (self.used_cpu - req.cpu_cores).max(0.0);
         self.used_memory_mb = self.used_memory_mb.saturating_sub(req.memory_mb);
-        self.used_metal_slots = self.used_metal_slots.saturating_sub(req.metal_slots);
+        self.used_gpu_cores = self.used_gpu_cores.saturating_sub(req.gpu_cores);
     }
 }
 
@@ -1428,7 +1428,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn metal_slots_tracked_correctly() {
+    async fn gpu_cores_tracked_correctly() {
         // Verify metal slots are part of resource allocation
         let sched = DagScheduler::new();
         let tid = TaskId::new();
@@ -1452,7 +1452,7 @@ mod tests {
         assert!(dequeued.is_some());
 
         let dequeued_task = dequeued.unwrap();
-        assert_eq!(dequeued_task.resources.metal_slots, 2);
+        assert_eq!(dequeued_task.resources.gpu_cores, 2);
     }
 
     #[tokio::test]
