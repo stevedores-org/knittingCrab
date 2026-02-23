@@ -124,7 +124,7 @@ impl CoordinatorServer {
             }
             CoordinatorRequest::Dequeue { worker_id } => {
                 match state.dequeue_task(worker_id).await {
-                    Ok(task) => CoordinatorResponse::Dequeued(task),
+                    Ok(task) => CoordinatorResponse::Dequeued(Box::new(task)),
                     Err(e) => CoordinatorResponse::Error(format!("dequeue failed: {}", e)),
                 }
             }

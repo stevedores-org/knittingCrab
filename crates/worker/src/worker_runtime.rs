@@ -102,6 +102,8 @@ pub struct WorkerRuntime<
     queue: Q,
     lease_store: LS,
     lease_manager: LeaseManager<LS>,
+    /// Resource monitor: used for Phase 2 resource-aware scheduling and allocation tracking (see ARCHITECTURE.md).
+    /// Currently used for can_allocate() and allocate() checks on task resources.
     #[allow(dead_code)]
     resource_monitor: RM,
     event_sink: ES,

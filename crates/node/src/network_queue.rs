@@ -20,7 +20,7 @@ impl Queue for NetworkQueue {
     async fn dequeue(&self, worker_id: WorkerId) -> Result<Option<TaskDescriptor>, CoreError> {
         let req = CoordinatorRequest::Dequeue { worker_id };
         match self.conn.request(req).await {
-            Ok(knitting_crab_transport::CoordinatorResponse::Dequeued(task)) => Ok(task),
+            Ok(knitting_crab_transport::CoordinatorResponse::Dequeued(task)) => Ok(*task),
             Ok(knitting_crab_transport::CoordinatorResponse::Error(e)) => {
                 Err(CoreError::Internal(e))
             }

@@ -22,9 +22,11 @@ pub struct SpawnParams {
 
 /// Handle to a running process.
 pub struct ProcessHandle {
+    /// Task ID: used for observability and event tracing when structured logging is enabled (see Issue #70).
     #[allow(dead_code)]
     task_id: TaskId,
     child: tokio::process::Child,
+    /// Event sink: used for emitting process lifecycle events for distributed tracing (see Issue #77).
     #[allow(dead_code)]
     sink: Arc<dyn EventSink>,
 }
