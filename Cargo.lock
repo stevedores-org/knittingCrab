@@ -18,7 +18,9 @@ dependencies = [
 name = "aivcs-session"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "clap",
+ "knitting-crab-core",
  "shell-escape",
  "thiserror",
  "tokio",

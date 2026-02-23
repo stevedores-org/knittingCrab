@@ -42,4 +42,7 @@ pub use retry::{ExitOutcome, RetryDecision, RetryPolicy};
 pub use task_aging::{AgingPolicy, TaskAge};
 pub use task_timeout::{TaskTimeoutManager, TimeoutHandle, TimeoutPolicy, TimeoutStatus};
 pub use time_slice_scheduler::{SchedulerState, SchedulerStats, TimeSliceScheduler};
-pub use traits::{EventSink, LeaseStore, Queue, ResourceMonitor, TaskDescriptor};
+pub use traits::{
+    EventSink, ExecutionLocation, ExecutionResult, LeaseStore, Queue, RemoteRole,
+    RemoteSessionConfig, RemoteSessionManager, ResourceMonitor, SessionHandle, TaskDescriptor,
+};
