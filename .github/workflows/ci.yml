@@ -132,36 +132,39 @@ jobs:
     if: always()
     needs: [fmt, clippy, build, test, security, apple-silicon]
     steps:
-      - uses: actions/checkout@v4
-      - name: Generate Results Summary
-        id: results
+      - name: Check results
+        id: check
         run: |
-          cat > /tmp/ci-summary.md << 'EOF'
-          ## CI Check Results
+          FMT="${{ needs.fmt.result }}"
+          CLIPPY="${{ needs.clippy.result }}"
+          BUILD="${{ needs.build.result }}"
+          TEST="${{ needs.test.result }}"
+          SECURITY="${{ needs.security.result }}"
+          APPLE="${{ needs.apple-silicon.result }}"
 
-          | Check | Status |
-          |-------|--------|
-          | 📝 Code Formatting | ${{ needs.fmt.result }} |
-          | 🔍 Clippy Lints | ${{ needs.clippy.result }} |
-          | 🏗️ Build | ${{ needs.build.result }} |
-          | ✅ Tests | ${{ needs.test.result }} |
-          | 🔐 Security Audit | ${{ needs.security.result }} |
-          | 🍎 Apple Silicon | ${{ needs.apple-silicon.result }} |
+          echo "fmt=${FMT}" >> $GITHUB_OUTPUT
+          echo "clippy=${CLIPPY}" >> $GITHUB_OUTPUT
+          echo "build=${BUILD}" >> $GITHUB_OUTPUT
+          echo "test=${TEST}" >> $GITHUB_OUTPUT
+          echo "security=${SECURITY}" >> $GITHUB_OUTPUT
+          echo "apple=${APPLE}" >> $GITHUB_OUTPUT
 
-          **Workflow**: [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
-          EOF
-          cat /tmp/ci-summary.md
-      - name: Comment on PR
-        if: github.event_name == 'pull_request'
-        uses: actions/github-script@v7
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            const fs = require('fs');
-            const summary = fs.readFileSync('/tmp/ci-summary.md', 'utf8');
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: summary
-            })
+          if [[ "$FMT" == "failure" ]] || [[ "$CLIPPY" == "failure" ]] || [[ "$BUILD" == "failure" ]] || [[ "$TEST" == "failure" ]] || [[ "$SECURITY" == "failure" ]] || [[ "$APPLE" == "failure" ]]; then
+            echo "status=failure" >> $GITHUB_OUTPUT
+            exit 1
+          else
+            echo "status=success" >> $GITHUB_OUTPUT
+          fi
+      - name: Report Results
+        if: always()
+        run: |
+          echo "## ✅ CI Check Results"
+          echo ""
+          echo "| Check | Status |"
+          echo "|-------|--------|"
+          echo "| 📝 Code Formatting | ${{ steps.check.outputs.fmt }} |"
+          echo "| 🔍 Clippy Lints | ${{ steps.check.outputs.clippy }} |"
+          echo "| 🏗️ Build | ${{ steps.check.outputs.build }} |"
+          echo "| ✅ Tests | ${{ steps.check.outputs.test }} |"
+          echo "| 🔐 Security Audit | ${{ steps.check.outputs.security }} |"
+          echo "| 🍎 Apple Silicon | ${{ steps.check.outputs.apple }} |"
