@@ -77,41 +77,54 @@ impl SqliteLeaseStore {
 
     /// Load all active leases from the store (for recovery on startup).
     pub async fn recover_active_leases(&self) -> Result<Vec<Lease>, CoreError> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| CoreError::LockPoisoned(format!("lease store: {e}")))?;
         let mut stmt =
             conn.prepare("SELECT json_data FROM leases WHERE expires_at > datetime('now')")?;
 
-        let leases = stmt
-            .query_map([], |row| {
-                let json: String = row.get(0)?;
-                Ok(serde_json::from_str(&json).unwrap())
-            })?
+        let rows: Vec<String> = stmt
+            .query_map([], |row| row.get(0))?
             .collect::<Result<Vec<_>, _>>()?;
 
-        Ok(leases)
+        rows.iter()
+            .map(|json| {
+                serde_json::from_str(json)
+                    .map_err(|e| CoreError::Internal(format!("corrupt lease JSON: {e}")))
+            })
+            .collect()
     }
 
     /// Find expired leases for cleanup.
     pub async fn find_expired_leases(&self) -> Result<Vec<Lease>, CoreError> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| CoreError::LockPoisoned(format!("lease store: {e}")))?;
         let mut stmt =
             conn.prepare("SELECT json_data FROM leases WHERE expires_at <= datetime('now')")?;
 
-        let leases = stmt
-            .query_map([], |row| {
-                let json: String = row.get(0)?;
-                Ok(serde_json::from_str(&json).unwrap())
-            })?
+        let rows: Vec<String> = stmt
+            .query_map([], |row| row.get(0))?
             .collect::<Result<Vec<_>, _>>()?;
 
-        Ok(leases)
+        rows.iter()
+            .map(|json| {
+                serde_json::from_str(json)
+                    .map_err(|e| CoreError::Internal(format!("corrupt lease JSON: {e}")))
+            })
+            .collect()
     }
 }
 
 #[async_trait::async_trait]
 impl LeaseStore for SqliteLeaseStore {
     async fn insert(&self, lease: Lease) -> Result<(), CoreError> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| CoreError::LockPoisoned(format!("lease store: {e}")))?;
         let json_data = serde_json::to_string(&lease)?;
         let state_str = match lease.state {
             crate::lease::LeaseState::Active => "Active",
@@ -142,21 +155,31 @@ impl LeaseStore for SqliteLeaseStore {
     }
 
     async fn get(&self, task_id: TaskId) -> Result<Option<Lease>, CoreError> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| CoreError::LockPoisoned(format!("lease store: {e}")))?;
         let mut stmt = conn.prepare("SELECT json_data FROM leases WHERE task_id = ?")?;
 
-        let lease = stmt
-            .query_row(params![task_id.to_string()], |row| {
-                let json: String = row.get(0)?;
-                Ok(serde_json::from_str(&json).unwrap())
-            })
+        let json: Option<String> = stmt
+            .query_row(params![task_id.to_string()], |row| row.get(0))
             .optional()?;
 
-        Ok(lease)
+        match json {
+            Some(j) => {
+                let lease = serde_json::from_str(&j)
+                    .map_err(|e| CoreError::Internal(format!("corrupt lease JSON: {e}")))?;
+                Ok(Some(lease))
+            }
+            None => Ok(None),
+        }
     }
 
     async fn update(&self, lease: Lease) -> Result<(), CoreError> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| CoreError::LockPoisoned(format!("lease store: {e}")))?;
         let json_data = serde_json::to_string(&lease)?;
         let state_str = match lease.state {
             crate::lease::LeaseState::Active => "Active",
@@ -183,7 +206,10 @@ impl LeaseStore for SqliteLeaseStore {
     }
 
     async fn remove(&self, task_id: TaskId) -> Result<(), CoreError> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| CoreError::LockPoisoned(format!("lease store: {e}")))?;
         conn.execute(
             "DELETE FROM leases WHERE task_id = ?",
             params![task_id.to_string()],
@@ -192,17 +218,22 @@ impl LeaseStore for SqliteLeaseStore {
     }
 
     async fn active_leases(&self) -> Result<Vec<Lease>, CoreError> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|e| CoreError::LockPoisoned(format!("lease store: {e}")))?;
         let mut stmt = conn.prepare("SELECT json_data FROM leases WHERE state = 'Active'")?;
 
-        let leases = stmt
-            .query_map([], |row| {
-                let json: String = row.get(0)?;
-                Ok(serde_json::from_str(&json).unwrap())
-            })?
+        let rows: Vec<String> = stmt
+            .query_map([], |row| row.get(0))?
             .collect::<Result<Vec<_>, _>>()?;
 
-        Ok(leases)
+        rows.iter()
+            .map(|json| {
+                serde_json::from_str(json)
+                    .map_err(|e| CoreError::Internal(format!("corrupt lease JSON: {e}")))
+            })
+            .collect()
     }
 }
 
