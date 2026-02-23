@@ -107,6 +107,9 @@ mod tests {
             is_critical: false,
             priority: Priority::Normal,
             dependencies: vec![],
+            goal: None,
+            budget: None,
+            test_gate: None,
         };
 
         assert_eq!(desc.task_id, task_id);
@@ -129,6 +132,9 @@ mod tests {
             is_critical: true,
             priority: Priority::Critical,
             dependencies: vec![],
+            goal: None,
+            budget: None,
+            test_gate: None,
         };
 
         assert!(desc.is_critical);
