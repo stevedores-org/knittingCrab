@@ -1,35 +1,4 @@
-pub mod artifact_index;
-pub mod cache;
-pub mod cache_key;
-pub mod cached_runner;
-pub mod dag;
-pub mod error;
-pub mod heartbeat;
-pub mod lease;
-pub mod policy;
-pub mod repo_lock;
-pub mod resource_model;
-pub mod runner;
-pub mod scheduler;
-pub mod shard;
-pub mod work_item;
-pub mod worker;
-pub mod worktree;
-
-pub use artifact_index::{ArtifactIndex, ArtifactMetadata, ArtifactType, RetentionPolicy};
-pub use cache::ArtifactCache;
-pub use cache_key::CacheKeyBuilder;
-pub use cached_runner::{CacheStats, CachedTaskRunner};
-pub use dag::DagEngine;
-pub use error::SchedulerError;
-pub use heartbeat::HeartbeatMonitor;
-pub use lease::{Lease, LeaseManager};
-pub use policy::{BackoffStrategy, Budget};
-pub use repo_lock::RepoLockManager;
-pub use resource_model::ResourceModel;
-pub use runner::{ProcessRunner, ProcessRunnerConfig};
-pub use scheduler::Scheduler;
-pub use shard::ShardAggregator;
-pub use work_item::{Priority, ShardConfig, TaskState, WorkItem};
-pub use worker::{FakeWorker, TaskResult, Worker};
-pub use worktree::{TaskScope, WorktreeManager};
+//! Workspace facade crate.
+//!
+//! This crate intentionally exposes no API. Runtime functionality lives in
+//! workspace member crates under `crates/`.

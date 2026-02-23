@@ -6,6 +6,9 @@ on:
       - main
       - develop
       - epic*/**
+      - feature/**
+      - fix/**
+      - bugfix/**
       - copilot/**
       - claude-code/**
   pull_request:
@@ -122,3 +125,46 @@ jobs:
           restore-keys: ${{ runner.os }}-cargo-
       - run: cargo build --all-targets
       - run: cargo test --all-targets
+
+  local-ci:
+    name: Local CI Results
+    runs-on: ubuntu-latest
+    if: always()
+    needs: [fmt, clippy, build, test, security, apple-silicon]
+    steps:
+      - name: Check results
+        id: check
+        run: |
+          FMT="${{ needs.fmt.result }}"
+          CLIPPY="${{ needs.clippy.result }}"
+          BUILD="${{ needs.build.result }}"
+          TEST="${{ needs.test.result }}"
+          SECURITY="${{ needs.security.result }}"
+          APPLE="${{ needs.apple-silicon.result }}"
+
+          echo "fmt=${FMT}" >> $GITHUB_OUTPUT
+          echo "clippy=${CLIPPY}" >> $GITHUB_OUTPUT
+          echo "build=${BUILD}" >> $GITHUB_OUTPUT
+          echo "test=${TEST}" >> $GITHUB_OUTPUT
+          echo "security=${SECURITY}" >> $GITHUB_OUTPUT
+          echo "apple=${APPLE}" >> $GITHUB_OUTPUT
+
+          if [[ "$FMT" == "failure" ]] || [[ "$CLIPPY" == "failure" ]] || [[ "$BUILD" == "failure" ]] || [[ "$TEST" == "failure" ]] || [[ "$SECURITY" == "failure" ]] || [[ "$APPLE" == "failure" ]]; then
+            echo "status=failure" >> $GITHUB_OUTPUT
+            exit 1
+          else
+            echo "status=success" >> $GITHUB_OUTPUT
+          fi
+      - name: Report Results
+        if: always()
+        run: |
+          echo "## ✅ CI Check Results"
+          echo ""
+          echo "| Check | Status |"
+          echo "|-------|--------|"
+          echo "| 📝 Code Formatting | ${{ steps.check.outputs.fmt }} |"
+          echo "| 🔍 Clippy Lints | ${{ steps.check.outputs.clippy }} |"
+          echo "| 🏗️ Build | ${{ steps.check.outputs.build }} |"
+          echo "| ✅ Tests | ${{ steps.check.outputs.test }} |"
+          echo "| 🔐 Security Audit | ${{ steps.check.outputs.security }} |"
+          echo "| 🍎 Apple Silicon | ${{ steps.check.outputs.apple }} |"

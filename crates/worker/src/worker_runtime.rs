@@ -102,6 +102,8 @@ pub struct WorkerRuntime<
     queue: Q,
     lease_store: LS,
     lease_manager: LeaseManager<LS>,
+    /// Resource monitor: used for Phase 2 resource-aware scheduling and allocation tracking (see ARCHITECTURE.md).
+    /// Currently used for can_allocate() and allocate() checks on task resources.
     #[allow(dead_code)]
     resource_monitor: RM,
     event_sink: ES,
@@ -161,6 +163,9 @@ impl<
 
     /// Main worker loop: dequeue, execute, retry cycle.
     pub async fn worker_loop(&self) -> Result<(), WorkerError> {
+        let span = tracing::info_span!("worker", worker_id = %self.worker_id);
+        let _guard = span.enter();
+
         loop {
             match self.queue.dequeue(self.worker_id).await {
                 Ok(Some(task)) => {
@@ -184,6 +189,13 @@ impl<
         &self,
         task: &knitting_crab_core::TaskDescriptor,
     ) -> Result<(), WorkerError> {
+        let span = tracing::info_span!(
+            "execute_task",
+            task_id = %task.task_id,
+            worker_id = %self.worker_id,
+        );
+        let _enter = span.enter();
+
         // Check if resources are available
         if !self.resource_monitor.can_allocate(&task.resources).await? {
             info!(
@@ -275,7 +287,18 @@ impl<
             )
             .await?;
 
-        heartbeat_handle.abort();
+        // Gracefully shutdown heartbeat task with 5-second grace period
+        // Instead of abort() which loses state, wait for clean shutdown
+        let shutdown_timeout = Duration::from_secs(5);
+        tokio::select! {
+            _ = heartbeat_handle => {
+                // Heartbeat finished cleanly, good!
+            }
+            _ = tokio::time::sleep(shutdown_timeout) => {
+                // Timeout: heartbeat_handle will be dropped, forcing abort
+                // This is acceptable as a fallback for hung tasks
+            }
+        }
 
         if let Err(e) = self
             .event_sink
@@ -327,6 +350,9 @@ impl<
 
     /// Reaper loop: periodically collect expired leases and requeue them.
     pub async fn reaper_loop(&self) -> Result<(), WorkerError> {
+        let span = tracing::info_span!("reaper", worker_id = %self.worker_id);
+        let _guard = span.enter();
+
         let mut ticker = interval(Duration::from_millis(self.reaper_interval_ms));
 
         loop {

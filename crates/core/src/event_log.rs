@@ -76,10 +76,7 @@ impl MemoryEventLog {
             .write()
             .unwrap_or_else(|e| e.into_inner())
             .clear();
-        self.logs
-            .write()
-            .unwrap_or_else(|e| e.into_inner())
-            .clear();
+        self.logs.write().unwrap_or_else(|e| e.into_inner()).clear();
     }
 }
 
