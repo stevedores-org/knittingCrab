@@ -23,6 +23,8 @@ sha2 = { workspace = true }
 tempfile = "3"
 tokio-test = { workspace = true }
 tracing-subscriber = { workspace = true }
+knitting-crab-core = { path = "crates/core" }
+knitting-crab-worker = { path = "crates/worker" }
 
 [workspace]
 members = [
