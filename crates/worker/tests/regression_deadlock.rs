@@ -1,5 +1,6 @@
 use async_trait::async_trait;
 use knitting_crab_core::event::{LogLine, TaskEvent};
+use knitting_crab_core::execution_location::ExecutionLocation;
 use knitting_crab_core::ids::TaskId;
 use knitting_crab_core::traits::EventSink;
 use knitting_crab_worker::process::{spawn, SpawnParams};
@@ -31,6 +32,7 @@ async fn test_wait_cancellation_deadlock() {
         command: vec!["sleep".to_string(), "10".to_string()],
         working_dir: std::env::temp_dir(),
         env: Default::default(),
+        location: ExecutionLocation::default(),
     };
 
     let mut handle = spawn(params, sink).await.expect("Failed to spawn process");

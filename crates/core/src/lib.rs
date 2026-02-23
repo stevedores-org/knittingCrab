@@ -4,6 +4,7 @@ pub mod circuit_breaker;
 pub mod error;
 pub mod event;
 pub mod event_log;
+pub mod execution_location;
 pub mod heartbeat;
 pub mod ids;
 pub mod lease;
@@ -27,6 +28,7 @@ pub use circuit_breaker::{
 pub use error::CoreError;
 pub use event::{LogLine, LogSource, TaskEvent};
 pub use event_log::{MemoryEventLog, MultiEventSink, SqliteEventLog};
+pub use execution_location::{ExecutionLocation, RemoteSessionTarget};
 pub use heartbeat::HeartbeatRecord;
 pub use ids::{LeaseId, TaskId, WorkerId};
 pub use lease::{Lease, LeaseState};
@@ -43,6 +45,7 @@ pub use task_aging::{AgingPolicy, TaskAge};
 pub use task_timeout::{TaskTimeoutManager, TimeoutHandle, TimeoutPolicy, TimeoutStatus};
 pub use time_slice_scheduler::{SchedulerState, SchedulerStats, TimeSliceScheduler};
 pub use traits::{
-    EventSink, ExecutionLocation, ExecutionResult, LeaseStore, Queue, RemoteRole,
-    RemoteSessionConfig, RemoteSessionManager, ResourceMonitor, SessionHandle, TaskDescriptor,
+    EventSink, ExecutionResult, LeaseStore, Queue, RemoteRole, RemoteSessionConfig,
+    RemoteSessionManager, RemoteSessionManagerTrait, ResourceMonitor, SessionConfig, SessionHandle,
+    TaskDescriptor,
 };

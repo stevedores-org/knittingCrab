@@ -1,4 +1,5 @@
 use knitting_crab_core::LogSource;
+use knitting_crab_core::execution_location::ExecutionLocation;
 use knitting_crab_core::ids::TaskId;
 use knitting_crab_core::retry::ExitOutcome;
 use knitting_crab_core::traits::EventSink;
@@ -41,6 +42,7 @@ async fn spawn_real_subprocess() {
         command: vec!["echo".to_string(), "hello world".to_string()],
         working_dir: PathBuf::from("/tmp"),
         env: Default::default(),
+        location: ExecutionLocation::default(),
     };
 
     let mut handle = spawn(params, sink.clone()).await.unwrap();

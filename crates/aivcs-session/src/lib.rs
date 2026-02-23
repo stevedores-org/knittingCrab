@@ -6,5 +6,5 @@
 pub mod remote;
 pub mod session;
 
-pub use remote::{RemoteSessionManager, RemoteTarget};
+pub use remote::{RemoteTarget, SshTmuxSessionManager};
 pub use session::{Role, SessionConfig, SessionError};
