@@ -25,6 +25,9 @@ pub enum CoreError {
     #[error("internal error: {0}")]
     Internal(String),
 
+    #[error("lock poisoned: {0}")]
+    LockPoisoned(String),
+
     #[error("database error: {0}")]
     DatabaseError(#[from] rusqlite::Error),
 
@@ -42,7 +45,4 @@ pub enum CoreError {
 
     #[error("dependency failed for task {0}")]
     DependencyFailed(TaskId),
-
-    #[error("goal lock conflict: another task is already working on goal '{goal}'")]
-    GoalLockConflict { goal: String },
 }
