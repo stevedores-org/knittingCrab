@@ -21,9 +21,6 @@ fn make_descriptor(task_id: TaskId) -> TaskDescriptor {
         is_critical: false,
         priority: Priority::Normal,
         dependencies: vec![],
-        goal: None,
-        budget: None,
-        test_gate: None,
     }
 }
 

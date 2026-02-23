@@ -137,12 +137,10 @@ mod tests {
             is_critical: false,
             priority: knitting_crab_core::Priority::Normal,
             dependencies: vec![],
-            goal: None,
             budget: Some(knitting_crab_core::AgentBudget {
                 max_tokens,
                 max_duration_secs,
             }),
-            test_gate: None,
         }
     }
 
@@ -158,9 +156,6 @@ mod tests {
             is_critical: false,
             priority: knitting_crab_core::Priority::Normal,
             dependencies: vec![],
-            goal: None,
-            budget: None,
-            test_gate: None,
         }
     }
 
