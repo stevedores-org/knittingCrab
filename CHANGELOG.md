@@ -20,6 +20,12 @@ All notable changes to knittingCrab will be documented in this file.
 
 ### Added
 
+#### Test Coverage Follow-up
+- Root replacement integration smoke tests in `tests/workspace_component.rs`
+  validating current `knitting-crab-core` + `knitting-crab-worker` wiring.
+- Scheduler soak-test fixture updated for optional `TaskDescriptor` fields
+  (`goal`, `budget`, `test_gate`) to keep workspace tests compiling.
+
 #### Core (`crates/core/`)
 - `ids.rs`: TaskId, WorkerId, LeaseId (UUID newtypes)
 - `lease.rs`: Lease state machine (Active → Completed/Failed/Expired/Cancelled)
