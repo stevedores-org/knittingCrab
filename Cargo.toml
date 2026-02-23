@@ -4,10 +4,6 @@ version.workspace = true
 edition.workspace = true
 publish = false
 
-[[test]]
-name = "component"
-path = "tests/component.rs"
-
 [dependencies]
 tokio = { workspace = true }
 thiserror = { workspace = true }
