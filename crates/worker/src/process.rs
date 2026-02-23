@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::timeout;
+use tracing;
 
 use knitting_crab_core::event::LogSource;
 use knitting_crab_core::ids::TaskId;
@@ -23,7 +24,6 @@ pub struct SpawnParams {
 /// Handle to a running process.
 pub struct ProcessHandle {
     /// Task ID: used for observability and event tracing when structured logging is enabled (see Issue #70).
-    #[allow(dead_code)]
     task_id: TaskId,
     child: tokio::process::Child,
     /// Event sink: used for emitting process lifecycle events for distributed tracing (see Issue #77).
@@ -34,6 +34,9 @@ pub struct ProcessHandle {
 impl ProcessHandle {
     /// Wait for the process to complete and return its outcome.
     pub async fn wait(&mut self) -> Result<ExitOutcome, WorkerError> {
+        let span = tracing::info_span!("process_wait", task_id = %self.task_id);
+        let _enter = span.enter();
+
         self.child
             .wait()
             .await
@@ -112,6 +115,9 @@ pub async fn spawn(
     params: SpawnParams,
     sink: Arc<dyn EventSink>,
 ) -> Result<ProcessHandle, WorkerError> {
+    let span = tracing::info_span!("process_spawn", task_id = %params.task_id);
+    let _enter = span.enter();
+
     let mut cmd = std::process::Command::new(&params.command[0]);
 
     if params.command.len() > 1 {

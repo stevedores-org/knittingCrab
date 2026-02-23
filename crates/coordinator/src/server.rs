@@ -263,7 +263,10 @@ mod tests {
         };
         let mut worker_id = None;
         let resp = CoordinatorServer::handle_request(&state, req, &mut worker_id).await;
-        assert!(matches!(resp, CoordinatorResponse::Dequeued(None)));
+        match resp {
+            CoordinatorResponse::Dequeued(opt) => assert!(opt.is_none()),
+            _ => panic!("expected Dequeued response"),
+        }
     }
 
     #[tokio::test]

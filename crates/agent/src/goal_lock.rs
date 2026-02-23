@@ -1,5 +1,6 @@
 use async_trait::async_trait;
 use dashmap::DashMap;
+use tracing;
 use knitting_crab_core::error::CoreError;
 use knitting_crab_core::ids::TaskId;
 use knitting_crab_core::traits::GoalLockStore;
@@ -34,9 +35,11 @@ impl GoalLockStore for InMemoryGoalLockStore {
         let entry = self.locks.entry(goal.to_string()).or_insert(task_id);
         if *entry == task_id {
             // We just inserted or already held it
+            tracing::info!(goal = %goal, task_id = %task_id, "acquired goal lock");
             Ok(())
         } else {
             // Another task holds the lock
+            tracing::debug!(goal = %goal, task_id = %task_id, holder = %*entry, "goal lock conflict");
             Err(CoreError::GoalLockConflict {
                 goal: goal.to_string(),
             })
@@ -50,6 +53,9 @@ impl GoalLockStore for InMemoryGoalLockStore {
             if *entry == task_id {
                 drop(entry);
                 self.locks.remove(goal);
+                tracing::info!(goal = %goal, task_id = %task_id, "released goal lock");
+            } else {
+                tracing::debug!(goal = %goal, task_id = %task_id, holder = %*entry, "ignoring foreign release");
             }
         }
         Ok(())
