@@ -1,6 +1,6 @@
 use knitting_crab::{
     FakeWorker, Priority, ProcessRunner, ProcessRunnerConfig, RepoLockManager, ResourceModel,
-    Scheduler, ShardAggregator, TaskResult, WorkItem, Worker,
+    Scheduler, ShardAggregator, TaskResult, WorkItem, Worker, WorktreeManager,
 };
 use std::time::Duration;
 
@@ -297,4 +297,93 @@ fn shard_aggregator_end_to_end() {
         agg2.overall_success(),
         "overall should pass if all shards pass"
     );
+}
+
+#[tokio::test]
+async fn worktree_per_task_integration() {
+    use std::fs;
+    use std::process::Command;
+    use tempfile::TempDir;
+
+    let temp_dir = TempDir::new().unwrap();
+    let repo_path = temp_dir.path().join("repo");
+    let worktree_base = temp_dir.path().join("worktrees");
+
+    // Initialize a git repo
+    fs::create_dir(&repo_path).unwrap();
+    Command::new("git")
+        .arg("init")
+        .current_dir(&repo_path)
+        .output()
+        .unwrap();
+
+    Command::new("git")
+        .args(["config", "user.email", "test@example.com"])
+        .current_dir(&repo_path)
+        .output()
+        .unwrap();
+
+    Command::new("git")
+        .args(["config", "user.name", "Test User"])
+        .current_dir(&repo_path)
+        .output()
+        .unwrap();
+
+    // Create a test commit
+    fs::write(repo_path.join("test.txt"), "test").unwrap();
+    Command::new("git")
+        .arg("add")
+        .arg("test.txt")
+        .current_dir(&repo_path)
+        .output()
+        .unwrap();
+
+    Command::new("git")
+        .args(["commit", "-m", "initial"])
+        .current_dir(&repo_path)
+        .output()
+        .unwrap();
+
+    let manager = WorktreeManager::new(worktree_base.clone());
+
+    // Create 3 worktrees for different tasks
+    let mut scopes = vec![];
+    for i in 0..3 {
+        let scope = manager
+            .create(i, &repo_path, "HEAD")
+            .await
+            .expect("failed to create worktree");
+        assert!(
+            scope.path.exists(),
+            "worktree path {} should exist",
+            scope.path.display()
+        );
+        scopes.push(scope);
+    }
+
+    // Verify all have distinct paths
+    let paths: Vec<_> = scopes.iter().map(|s| &s.path).collect();
+    for i in 0..paths.len() {
+        for j in (i + 1)..paths.len() {
+            assert_ne!(paths[i], paths[j], "worktree paths must be distinct");
+        }
+    }
+
+    // Verify all paths exist before cleanup
+    for scope in &scopes {
+        assert!(scope.path.exists(), "worktree should exist before drop");
+    }
+
+    // Drop all scopes and verify cleanup
+    let saved_paths = scopes.iter().map(|s| s.path.clone()).collect::<Vec<_>>();
+    drop(scopes);
+
+    // Verify all paths were cleaned up
+    for path in saved_paths {
+        assert!(
+            !path.exists(),
+            "worktree {} should be removed after drop",
+            path.display()
+        );
+    }
 }

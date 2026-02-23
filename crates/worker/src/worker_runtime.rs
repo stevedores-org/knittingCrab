@@ -1,11 +1,12 @@
 use async_trait::async_trait;
+use dashmap::DashMap;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::{interval, sleep};
 use tracing::{debug, error, info};
 
 use knitting_crab_core::event::TaskEvent;
-use knitting_crab_core::ids::WorkerId;
+use knitting_crab_core::ids::{TaskId, WorkerId};
 use knitting_crab_core::lease::Lease;
 use knitting_crab_core::retry::ExitOutcome;
 use knitting_crab_core::traits::{EventSink, LeaseStore, Queue, ResourceMonitor};
@@ -51,11 +52,49 @@ impl ProcessExecutor for RealProcessExecutor {
     }
 }
 
+struct ActiveTaskGuard {
+    task_id: TaskId,
+    active_tasks: Arc<DashMap<TaskId, CancelToken>>,
+}
+
+impl Drop for ActiveTaskGuard {
+    fn drop(&mut self) {
+        self.active_tasks.remove(&self.task_id);
+    }
+}
+
+struct ResourceGuard<RM: ResourceMonitor + Clone> {
+    monitor: RM,
+    allocation: Option<knitting_crab_core::resource::ResourceAllocation>,
+}
+
+impl<RM: ResourceMonitor + Clone> ResourceGuard<RM> {
+    fn new(monitor: RM, allocation: knitting_crab_core::resource::ResourceAllocation) -> Self {
+        Self {
+            monitor,
+            allocation: Some(allocation),
+        }
+    }
+}
+
+impl<RM: ResourceMonitor + Clone> Drop for ResourceGuard<RM> {
+    fn drop(&mut self) {
+        if let Some(allocation) = self.allocation.take() {
+            let monitor = self.monitor.clone();
+            tokio::spawn(async move {
+                if let Err(e) = monitor.release(&allocation).await {
+                    error!("failed to release resources: {}", e);
+                }
+            });
+        }
+    }
+}
+
 /// Main worker runtime orchestrating task execution.
 pub struct WorkerRuntime<
     Q: Queue,
     LS: LeaseStore + Clone,
-    RM: ResourceMonitor,
+    RM: ResourceMonitor + Clone,
     ES: EventSink + Clone,
     PE: ProcessExecutor,
 > {
@@ -67,6 +106,7 @@ pub struct WorkerRuntime<
     resource_monitor: RM,
     event_sink: ES,
     process_executor: PE,
+    active_tasks: Arc<DashMap<TaskId, CancelToken>>,
     lease_ttl: Duration,
     heartbeat_interval_ms: u64,
     reaper_interval_ms: u64,
@@ -75,7 +115,7 @@ pub struct WorkerRuntime<
 impl<
         Q: Queue,
         LS: LeaseStore + Clone,
-        RM: ResourceMonitor,
+        RM: ResourceMonitor + Clone,
         ES: EventSink + Clone,
         PE: ProcessExecutor,
     > WorkerRuntime<Q, LS, RM, ES, PE>
@@ -97,6 +137,7 @@ impl<
             resource_monitor,
             event_sink,
             process_executor,
+            active_tasks: Arc::new(DashMap::new()),
             lease_ttl: Duration::from_secs(30),
             heartbeat_interval_ms: 5000,
             reaper_interval_ms: 10000,
@@ -143,21 +184,61 @@ impl<
         &self,
         task: &knitting_crab_core::TaskDescriptor,
     ) -> Result<(), WorkerError> {
+        // Check if resources are available
+        if !self.resource_monitor.can_allocate(&task.resources).await? {
+            info!(
+                "insufficient resources for task {}, requeueing",
+                task.task_id
+            );
+            self.queue.requeue(task.task_id, task.attempt).await?;
+            return Ok(());
+        }
+
+        // Allocate resources
+        self.resource_monitor.allocate(&task.resources).await?;
+
+        // Guard to ensure resources are released when this scope exits
+        let _resource_guard =
+            ResourceGuard::new(self.resource_monitor.clone(), task.resources.clone());
+
         info!("acquiring lease for task {}", task.task_id);
 
         let lease = Lease::new(task.task_id, self.worker_id, self.lease_ttl, task.attempt);
-        self.lease_manager.acquire(lease.clone()).await?;
+        match self.lease_manager.acquire(lease.clone()).await {
+            Ok(_) => {}
+            Err(knitting_crab_core::error::CoreError::AlreadyLeased) => {
+                // Task is already running elsewhere or completed
+                return Ok(());
+            }
+            Err(e) => {
+                // System error, try to requeue so we don't lose the task
+                error!("failed to acquire lease: {}, requeueing", e);
+                self.queue.requeue(task.task_id, task.attempt).await?;
+                return Err(e.into());
+            }
+        }
 
-        self.event_sink
+        if let Err(e) = self
+            .event_sink
             .emit_event(TaskEvent::Acquired {
                 task_id: task.task_id,
                 worker_id: self.worker_id,
                 attempt: task.attempt,
             })
-            .await?;
+            .await
+        {
+            error!("failed to emit acquired event: {}", e);
+            // Proceed anyway as we have the lease
+        }
 
         let (cancel_token, cancel_guard) = CancelToken::new();
-        let _cancel_token = Arc::new(cancel_token);
+        self.active_tasks.insert(task.task_id, cancel_token);
+
+        // Ensure token is removed when this function exits (even on panic)
+        let _guard = ActiveTaskGuard {
+            task_id: task.task_id,
+            active_tasks: self.active_tasks.clone(),
+        };
 
         // Spawn heartbeat task
         let lease_manager = self.lease_manager.clone();
@@ -196,12 +277,17 @@ impl<
 
         heartbeat_handle.abort();
 
-        self.event_sink
+        if let Err(e) = self
+            .event_sink
             .emit_event(TaskEvent::Completed {
                 task_id: task.task_id,
                 outcome,
             })
-            .await?;
+            .await
+        {
+            error!("failed to emit completion event: {}", e);
+            // Proceed to complete the lease anyway
+        }
 
         let decision = RetryHandler::decide(outcome, &task.policy, task.attempt);
 
@@ -272,6 +358,11 @@ impl<
         &self,
         task_id: knitting_crab_core::ids::TaskId,
     ) -> Result<(), WorkerError> {
+        // Trigger cancellation if active locally
+        if let Some(token) = self.active_tasks.get(&task_id) {
+            token.cancel();
+        }
+
         if self.lease_store.get(task_id).await?.is_some() {
             self.lease_manager.cancel(task_id).await?;
             self.event_sink
@@ -321,6 +412,7 @@ mod tests {
             attempt: 0,
             is_critical: false,
             priority: knitting_crab_core::Priority::Normal,
+            dependencies: vec![],
         };
 
         queue.enqueue(task.clone());
@@ -434,6 +526,7 @@ mod tests {
             attempt: 0,
             is_critical: false,
             priority: knitting_crab_core::Priority::Normal,
+            dependencies: vec![],
         };
 
         // Execute task
@@ -477,6 +570,7 @@ mod tests {
             attempt: 0,
             is_critical: false,
             priority: knitting_crab_core::Priority::Normal,
+            dependencies: vec![],
         };
 
         // Enqueue and then cancel
@@ -557,5 +651,62 @@ mod tests {
         // Lease manager should be initialized and ready
         assert_eq!(runtime.worker_id, worker_id);
         assert_eq!(runtime.lease_ttl, Duration::from_secs(30));
+    }
+
+    #[tokio::test]
+    async fn test_execute_task_requeues_on_insufficient_resources() {
+        let queue = FakeWorker::new();
+        let lease_store = InMemoryLeaseStore::new();
+        let resource_monitor = FakeWorker::new();
+        let event_sink = FakeWorker::new();
+        let process_executor = FakeWorker::new();
+
+        // Set resource behavior to deny
+        resource_monitor.set_resource_behavior(crate::fake_worker::ResourceBehavior::AlwaysDeny);
+
+        let worker_id = WorkerId::new();
+        let runtime = WorkerRuntime::new(
+            worker_id,
+            queue.clone(),
+            lease_store.clone(),
+            resource_monitor.clone(),
+            event_sink,
+            process_executor,
+        );
+
+        let task_id = knitting_crab_core::TaskId::new();
+        let task = knitting_crab_core::TaskDescriptor {
+            task_id,
+            command: vec!["echo".to_string()],
+            working_dir: PathBuf::from("/tmp"),
+            env: Default::default(),
+            resources: ResourceAllocation::default(),
+            policy: RetryPolicy::default(),
+            attempt: 0,
+            is_critical: false,
+            priority: knitting_crab_core::Priority::Normal,
+            dependencies: Vec::new(),
+        };
+
+        // Enqueue task (so FakeWorker can find it during requeue)
+        queue.enqueue(task.clone());
+
+        // Execute task
+        let result = runtime.execute_task(&task).await;
+        assert!(result.is_ok(), "task execution should return ok (requeued)");
+
+        // Verify task was NOT executed (no lease acquired)
+        let lease = lease_store.get(task_id).await.unwrap();
+        assert!(lease.is_none(), "lease should not be acquired");
+
+        // Verify task was requeued
+        // Since we didn't dequeue it, FakeWorker::requeue duplicates it.
+        // So we should have 2 items now.
+        let item1 = queue.dequeue(worker_id).await.unwrap();
+        let item2 = queue.dequeue(worker_id).await.unwrap();
+
+        assert!(item1.is_some());
+        assert!(item2.is_some());
+        assert!(queue.dequeue(worker_id).await.unwrap().is_none());
     }
 }

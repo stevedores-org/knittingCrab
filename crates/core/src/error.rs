@@ -1,5 +1,7 @@
 use thiserror::Error;
 
+use crate::ids::TaskId;
+
 #[derive(Error, Debug)]
 pub enum CoreError {
     #[error("task already has an active lease")]
@@ -31,4 +33,16 @@ pub enum CoreError {
 
     #[error("serialization error: {0}")]
     SerializationError(#[from] serde_json::Error),
+
+    #[error("cyclic dependency detected involving task {0}")]
+    CyclicDependency(TaskId),
+
+    #[error("unknown dependency: task {0} not in graph")]
+    UnknownDependency(TaskId),
+
+    #[error("duplicate task id: {0}")]
+    DuplicateTask(TaskId),
+
+    #[error("dependency failed for task {0}")]
+    DependencyFailed(TaskId),
 }

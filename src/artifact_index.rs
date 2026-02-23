@@ -422,10 +422,8 @@ mod tests {
         // Test that registering multiple artifacts of the same type doesn't cause collisions
         let mut index = ArtifactIndex::new(RetentionPolicy::unlimited());
 
-        let artifact1 =
-            ArtifactMetadata::new(1, ArtifactType::Log, 1024, PathBuf::from("/log1"));
-        let artifact2 =
-            ArtifactMetadata::new(1, ArtifactType::Log, 2048, PathBuf::from("/log2"));
+        let artifact1 = ArtifactMetadata::new(1, ArtifactType::Log, 1024, PathBuf::from("/log1"));
+        let artifact2 = ArtifactMetadata::new(1, ArtifactType::Log, 2048, PathBuf::from("/log2"));
 
         index.register(artifact1.clone());
         index.register(artifact2.clone());

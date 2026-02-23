@@ -1,17 +1,19 @@
 use serde::{Deserialize, Serialize};
 
-/// Resource allocation specification (stub for Epic 1).
+/// Resource allocation specification.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ResourceAllocation {
     pub cpu_cores: f32,
     pub memory_mb: u32,
+    pub gpu_cores: u32,
 }
 
 impl ResourceAllocation {
-    pub fn new(cpu_cores: f32, memory_mb: u32) -> Self {
+    pub fn new(cpu_cores: f32, memory_mb: u32, gpu_cores: u32) -> Self {
         Self {
             cpu_cores,
             memory_mb,
+            gpu_cores,
         }
     }
 }
@@ -21,6 +23,7 @@ impl Default for ResourceAllocation {
         Self {
             cpu_cores: 1.0,
             memory_mb: 256,
+            gpu_cores: 0,
         }
     }
 }
@@ -34,5 +37,22 @@ mod tests {
         let alloc = ResourceAllocation::default();
         assert_eq!(alloc.cpu_cores, 1.0);
         assert_eq!(alloc.memory_mb, 256);
+        assert_eq!(alloc.gpu_cores, 0);
+    }
+
+    #[test]
+    fn test_allocation_with_gpu_cores() {
+        let alloc = ResourceAllocation::new(2.0, 512, 1);
+        assert_eq!(alloc.cpu_cores, 2.0);
+        assert_eq!(alloc.memory_mb, 512);
+        assert_eq!(alloc.gpu_cores, 1);
+    }
+
+    #[test]
+    fn test_allocation_without_gpu_cores() {
+        let alloc = ResourceAllocation::new(1.0, 256, 0);
+        assert_eq!(alloc.cpu_cores, 1.0);
+        assert_eq!(alloc.memory_mb, 256);
+        assert_eq!(alloc.gpu_cores, 0);
     }
 }
