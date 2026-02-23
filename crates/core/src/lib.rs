@@ -13,6 +13,7 @@ pub mod priority_queue;
 pub mod queue_backpressure;
 pub mod resource;
 pub mod retry;
+pub mod task_aging;
 pub mod task_timeout;
 pub mod time_slice_scheduler;
 pub mod traits;
@@ -36,6 +37,7 @@ pub use queue_backpressure::{
 };
 pub use resource::ResourceAllocation;
 pub use retry::{ExitOutcome, RetryDecision, RetryPolicy};
+pub use task_aging::{AgingPolicy, TaskAge};
 pub use task_timeout::{TaskTimeoutManager, TimeoutHandle, TimeoutPolicy, TimeoutStatus};
 pub use time_slice_scheduler::{SchedulerState, SchedulerStats, TimeSliceScheduler};
-pub use traits::{EventSink, LeaseStore, Queue, ResourceMonitor, TaskDescriptor};
+pub use traits::{EventSink, GoalLockStore, LeaseStore, Queue, ResourceMonitor, TaskDescriptor};

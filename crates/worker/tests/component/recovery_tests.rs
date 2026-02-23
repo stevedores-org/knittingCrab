@@ -28,6 +28,9 @@ async fn crashed_worker_tasks_recovered() {
         resources: ResourceAllocation::default(),
         policy: RetryPolicy::default(),
         attempt: 0,
+        is_critical: false,
+        priority: knitting_crab_core::Priority::Normal,
+        dependencies: vec![],
     };
     queue.enqueue(task.clone());
 
@@ -75,6 +78,9 @@ async fn hung_task_killed_and_retried() {
         resources: ResourceAllocation::default(),
         policy: RetryPolicy::default(),
         attempt: 0,
+        is_critical: false,
+        priority: knitting_crab_core::Priority::Normal,
+        dependencies: vec![],
     };
     queue.enqueue(task.clone());
 

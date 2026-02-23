@@ -72,8 +72,12 @@ enum Commands {
     },
 }
 
-fn init_logging(_debug: bool) {
-    // Logging can be controlled via RUST_LOG environment variable
+fn init_logging(debug: bool) {
+    // Configure logging based on debug flag and RUST_LOG environment variable.
+    // Debug mode enables trace-level logging if RUST_LOG is not already set.
+    if debug && std::env::var("RUST_LOG").is_err() {
+        std::env::set_var("RUST_LOG", "trace");
+    }
     fmt().with_writer(std::io::stderr).init();
 }
 
@@ -92,19 +96,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         } => {
             let role = role.parse()?;
             let config = SessionConfig::new(repo, work_id, role)?;
-            let remote = RemoteTarget { host, user };
+            let remote = RemoteTarget::new(host, user)?;
             let manager = RemoteSessionManager::new(remote);
 
-            let session_name = manager.attach_or_create(&config)?;
+            let session_name = manager.attach_or_create(&config).await?;
             println!("{}", session_name);
             Ok(())
         }
 
         Commands::List { host, user } => {
-            let remote = RemoteTarget { host, user };
+            let remote = RemoteTarget::new(host, user)?;
             let manager = RemoteSessionManager::new(remote);
 
-            let sessions = manager.list_sessions()?;
+            let sessions = manager.list_sessions().await?;
             for session in sessions {
                 println!("{}", session);
             }
@@ -116,10 +120,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             host,
             user,
         } => {
-            let remote = RemoteTarget { host, user };
+            let remote = RemoteTarget::new(host, user)?;
             let manager = RemoteSessionManager::new(remote);
 
-            manager.kill_session(&session)?;
+            manager.kill_session(&session).await?;
             println!("Killed session: {}", session);
             Ok(())
         }

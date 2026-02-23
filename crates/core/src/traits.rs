@@ -29,6 +29,9 @@ pub struct TaskDescriptor {
     /// Determines queue placement and round-robin scheduling order.
     /// Defaults to Normal priority if not specified.
     pub priority: Priority,
+    /// Task IDs that must complete before this task can run.
+    #[serde(default)]
+    pub dependencies: Vec<TaskId>,
 }
 
 /// A queue that stores and distributes tasks to workers.
@@ -86,6 +89,24 @@ pub trait EventSink: Send + Sync + 'static {
     async fn emit_log(&self, log: LogLine) -> Result<(), CoreError>;
 }
 
+/// Goal lock store for preventing duplicate agent work on the same goal.
+///
+/// Ensures that only one task can work on a given goal at a time,
+/// preventing duplicate effort and resource contention.
+#[async_trait]
+pub trait GoalLockStore: Send + Sync + 'static {
+    /// Try to acquire a lock for the given goal.
+    ///
+    /// Returns Ok(()) if the lock was acquired, Err(GoalLockConflict) if another task holds it.
+    async fn try_acquire(&self, goal: &str, task_id: TaskId) -> Result<(), CoreError>;
+
+    /// Release a lock for the given goal (only if held by the given task).
+    async fn release(&self, goal: &str, task_id: TaskId) -> Result<(), CoreError>;
+
+    /// Get the task ID currently holding the lock for a goal, if any.
+    async fn holder(&self, goal: &str) -> Result<Option<TaskId>, CoreError>;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -103,6 +124,7 @@ mod tests {
             attempt: 0,
             is_critical: false,
             priority: Priority::Normal,
+            dependencies: vec![],
         };
 
         assert_eq!(desc.task_id, task_id);
@@ -124,6 +146,7 @@ mod tests {
             attempt: 0,
             is_critical: true,
             priority: Priority::Critical,
+            dependencies: vec![],
         };
 
         assert!(desc.is_critical);
