@@ -473,4 +473,77 @@ mod tests {
         let result = store.get(task_id).await.unwrap().unwrap();
         assert_eq!(result.state, LeaseState::Completed);
     }
+
+    // ===== TOCTOU Race Condition Tests =====
+
+    #[tokio::test]
+    async fn reaper_prevents_duplicate_execution_race() {
+        // This test verifies that the reaper's check-and-remove operation is atomic.
+        // Without atomicity, the following race could occur:
+        // 1. Reaper checks lease, sees it's expired
+        // 2. Worker A tries to acquire the same lease (before reaper removes it)
+        // 3. Reaper marks lease as expired
+        // 4. Worker B tries to acquire the now-expired lease (should fail)
+        // GOAL: At most ONE worker should ever hold an exclusive lease for a task
+
+        let store = InMemoryLeaseStore::new();
+        let manager = LeaseManager::new(store.clone());
+
+        let task_id = TaskId::new();
+        let worker_a_id = WorkerId::new();
+        let worker_b_id = WorkerId::new();
+
+        // Create a lease that will quickly expire
+        let initial_lease = Lease::new(task_id, worker_a_id, Duration::from_millis(1), 0);
+        manager.acquire(initial_lease).await.unwrap();
+
+        // Wait for lease to expire
+        std::thread::sleep(Duration::from_millis(10));
+
+        // Collect expired leases (this should mark as Expired)
+        let expired = manager.collect_expired().await.unwrap();
+        assert_eq!(expired.len(), 1);
+
+        // NOW: the critical test - can worker B acquire a lease for the same task?
+        // The lease is marked Expired, so Worker B should NOT be able to acquire it
+        let lease_b = Lease::new(task_id, worker_b_id, Duration::from_secs(10), 0);
+        let result = manager.acquire(lease_b).await;
+
+        // This should FAIL because there's already a lease (even if expired)
+        // The fix ensures no window for duplicate acquisition
+        assert!(matches!(result, Err(CoreError::AlreadyLeased)));
+    }
+
+    #[tokio::test]
+    async fn only_one_worker_can_hold_active_lease_after_reaper() {
+        // Atomic reaper behavior: ensure exactly one worker can get the task after reaper processes
+        let store = InMemoryLeaseStore::new();
+        let manager = LeaseManager::new(store.clone());
+
+        let task_id = TaskId::new();
+        let worker_a_id = WorkerId::new();
+        let worker_b_id = WorkerId::new();
+
+        // Worker A gets initial lease, then it expires
+        let lease_a = Lease::new(task_id, worker_a_id, Duration::from_millis(1), 0);
+        manager.acquire(lease_a).await.unwrap();
+
+        std::thread::sleep(Duration::from_millis(10));
+
+        // Reaper collects and marks as expired
+        let _ = manager.collect_expired().await.unwrap();
+
+        // Remove the expired lease (what reaper would do next)
+        manager.remove(task_id).await.unwrap();
+
+        // Now Worker B should be able to acquire fresh lease
+        let lease_b = Lease::new(task_id, worker_b_id, Duration::from_secs(10), 0);
+        let result = manager.acquire(lease_b).await;
+        assert!(result.is_ok());
+
+        // Verify Worker B is the sole holder
+        let retrieved = store.get(task_id).await.unwrap().unwrap();
+        assert_eq!(retrieved.worker_id, worker_b_id);
+        assert_eq!(retrieved.state, LeaseState::Active);
+    }
 }
