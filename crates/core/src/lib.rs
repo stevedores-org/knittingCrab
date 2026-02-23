@@ -1,3 +1,4 @@
+pub mod agent;
 pub mod backpressure_integration;
 pub mod circuit_breaker;
 pub mod error;
@@ -18,6 +19,7 @@ pub mod task_timeout;
 pub mod time_slice_scheduler;
 pub mod traits;
 
+pub use agent::{AgentBudget, TestGate};
 pub use backpressure_integration::{TaskExecutionFilter, TaskRejectionReason};
 pub use circuit_breaker::{
     CircuitBreaker, CircuitBreakerConfig, CircuitBreakerStats, CircuitState,
