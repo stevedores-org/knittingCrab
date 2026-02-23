@@ -183,7 +183,7 @@ mod tests {
         let age = TaskAge::new(Priority::Normal);
         std::thread::sleep(Duration::from_millis(20));
         let age_ms = age.age_ms();
-        assert!(age_ms >= 15 && age_ms <= 100);
+        assert!((15..=100).contains(&age_ms));
     }
 
     #[test]

@@ -270,7 +270,7 @@ fn fairness_multi_round_consistency() {
     let avg = round_stats.iter().sum::<usize>() as f64 / round_stats.len() as f64;
     let variance = round_stats
         .iter()
-        .map(|&x| ((x as f64 - avg).powi(2)) as f64)
+        .map(|&x| (x as f64 - avg).powi(2))
         .sum::<f64>()
         / round_stats.len() as f64;
 
