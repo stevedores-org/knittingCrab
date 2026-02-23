@@ -45,10 +45,4 @@ pub enum CoreError {
 
     #[error("dependency failed for task {0}")]
     DependencyFailed(TaskId),
-
-    #[error("goal lock conflict: another task is already working on goal '{goal}'")]
-    GoalLockConflict { goal: String },
-
-    #[error("budget exceeded: {reason}")]
-    BudgetExceeded { reason: String },
 }

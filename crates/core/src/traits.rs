@@ -32,18 +32,6 @@ pub struct TaskDescriptor {
     /// Task IDs that must complete before this task can run.
     #[serde(default)]
     pub dependencies: Vec<TaskId>,
-
-    /// Agent intent / human-readable goal (optional).
-    #[serde(default)]
-    pub goal: Option<String>,
-
-    /// Budget constraints for token consumption and time (optional).
-    #[serde(default)]
-    pub budget: Option<crate::agent::AgentBudget>,
-
-    /// Test gate that must pass before task completes (optional).
-    #[serde(default)]
-    pub test_gate: Option<crate::agent::TestGate>,
 }
 
 /// A queue that stores and distributes tasks to workers.
@@ -99,24 +87,6 @@ pub trait EventSink: Send + Sync + 'static {
 
     /// Emit a log line.
     async fn emit_log(&self, log: LogLine) -> Result<(), CoreError>;
-}
-
-/// Goal lock store for preventing duplicate agent work on the same goal.
-///
-/// Ensures that only one task can work on a given goal at a time,
-/// preventing duplicate effort and resource contention.
-#[async_trait]
-pub trait GoalLockStore: Send + Sync + 'static {
-    /// Try to acquire a lock for the given goal.
-    ///
-    /// Returns Ok(()) if the lock was acquired, Err(GoalLockConflict) if another task holds it.
-    async fn try_acquire(&self, goal: &str, task_id: TaskId) -> Result<(), CoreError>;
-
-    /// Release a lock for the given goal (only if held by the given task).
-    async fn release(&self, goal: &str, task_id: TaskId) -> Result<(), CoreError>;
-
-    /// Get the task ID currently holding the lock for a goal, if any.
-    async fn holder(&self, goal: &str) -> Result<Option<TaskId>, CoreError>;
 }
 
 #[cfg(test)]
