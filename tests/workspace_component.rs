@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use knitting_crab_core::{EventSink, Queue};
+use knitting_crab_core::{EventSink, ExecutionLocation, Queue};
 use knitting_crab_core::{
     ExitOutcome, Priority, ResourceAllocation, RetryPolicy, TaskDescriptor, TaskId, WorkerId,
 };
@@ -61,6 +61,7 @@ async fn process_executor_respects_configured_fake_behavior() {
         command: vec!["echo".to_string(), "ignored".to_string()],
         working_dir: PathBuf::from("."),
         env: HashMap::new(),
+        location: ExecutionLocation::default(),
     };
 
     let (cancel_token, cancel_guard) = CancelToken::new();

@@ -4,6 +4,7 @@ use std::path::PathBuf;
 
 use crate::error::CoreError;
 use crate::event::{LogLine, TaskEvent};
+use crate::execution_location::ExecutionLocation;
 use crate::ids::{TaskId, WorkerId};
 use crate::lease::Lease;
 use crate::priority::Priority;
@@ -108,15 +109,7 @@ pub struct ExecutionResult {
     pub stderr: String,
 }
 
-/// Where a task should execute.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
-pub enum ExecutionLocation {
-    #[default]
-    Local,
-    Remote(RemoteSessionConfig),
-}
-
-/// Config for a remote execution target.
+/// Config for a remote execution target (used by RemoteSessionManager).
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct RemoteSessionConfig {
     pub host: String,
@@ -135,7 +128,7 @@ pub enum RemoteRole {
     Human, // manual intervention
 }
 
-/// Manages lifecycle of remote tmux sessions.
+/// Manages lifecycle of remote tmux sessions (synchronous command execution).
 #[async_trait]
 pub trait RemoteSessionManager: Send + Sync + 'static {
     async fn create_or_attach(
@@ -148,6 +141,42 @@ pub trait RemoteSessionManager: Send + Sync + 'static {
         cmd: &str,
     ) -> Result<ExecutionResult, CoreError>;
     async fn kill_session(&self, session: &SessionHandle) -> Result<(), CoreError>;
+}
+
+/// Configuration for a remote execution session.
+#[derive(Debug, Clone)]
+pub struct SessionConfig {
+    pub host: String,
+    pub user: String,
+    pub repo_name: String,
+}
+
+/// Manager for remote session execution via SSH + tmux (sentinel-based async polling).
+#[async_trait]
+pub trait RemoteSessionManagerTrait: Send + Sync + 'static {
+    /// Ensure a tmux session exists for the given configuration.
+    async fn ensure_session(&self, config: &SessionConfig) -> Result<String, CoreError>;
+
+    /// Run a command in a specific session window.
+    /// Returns when the command is submitted (not when it completes).
+    /// Use poll_exit_code() to check for completion.
+    async fn run_command_in_session(
+        &self,
+        session_name: &str,
+        window_name: &str,
+        command: &str,
+        sentinel_path: &str,
+    ) -> Result<(), CoreError>;
+
+    /// Poll for exit code via sentinel file.
+    /// Returns Some(code) if the sentinel file exists, None if not yet available.
+    async fn poll_exit_code(&self, sentinel_path: &str) -> Result<Option<i32>, CoreError>;
+
+    /// Remove the sentinel file (cleanup after task completes).
+    async fn cleanup_sentinel(&self, sentinel_path: &str) -> Result<(), CoreError>;
+
+    /// Kill a tmux session.
+    async fn kill_session(&self, session_name: &str) -> Result<(), CoreError>;
 }
 
 #[cfg(test)]
@@ -197,5 +226,72 @@ mod tests {
         assert!(desc.is_critical);
         assert_eq!(desc.priority, Priority::Critical);
         assert!(desc.priority.is_critical());
+    }
+
+    #[test]
+    fn task_descriptor_location_defaults_to_local() {
+        let task_id = TaskId::new();
+        let desc = TaskDescriptor {
+            task_id,
+            command: vec!["echo".to_string()],
+            working_dir: PathBuf::from("/tmp"),
+            env: HashMap::new(),
+            resources: ResourceAllocation::default(),
+            policy: RetryPolicy::default(),
+            attempt: 0,
+            is_critical: false,
+            priority: Priority::Normal,
+            dependencies: vec![],
+            location: ExecutionLocation::default(),
+        };
+
+        assert_eq!(desc.location, ExecutionLocation::Local);
+    }
+
+    #[test]
+    fn task_descriptor_with_remote_location_serializes() {
+        let task_id = TaskId::new();
+        let target = crate::execution_location::RemoteSessionTarget {
+            host: "aivcs.local".to_string(),
+            user: "aivcs".to_string(),
+            repo_name: "my-repo".to_string(),
+        };
+        let desc = TaskDescriptor {
+            task_id,
+            command: vec!["echo".to_string()],
+            working_dir: PathBuf::from("/tmp"),
+            env: HashMap::new(),
+            resources: ResourceAllocation::default(),
+            policy: RetryPolicy::default(),
+            attempt: 0,
+            is_critical: false,
+            priority: Priority::Normal,
+            dependencies: vec![],
+            location: ExecutionLocation::RemoteSession(target),
+        };
+
+        let json = serde_json::to_string(&desc).unwrap();
+        let deserialized: TaskDescriptor = serde_json::from_str(&json).unwrap();
+        assert_eq!(desc.location, deserialized.location);
+    }
+
+    #[test]
+    fn remote_session_manager_trait_is_object_safe() {
+        // This test ensures RemoteSessionManagerTrait can be used as a trait object.
+        // If this compiles, the trait is object-safe.
+        let _: Option<Box<dyn RemoteSessionManagerTrait>> = None;
+    }
+
+    #[test]
+    fn session_config_creation() {
+        let config = SessionConfig {
+            host: "aivcs.local".to_string(),
+            user: "aivcs".to_string(),
+            repo_name: "my-repo".to_string(),
+        };
+
+        assert_eq!(config.host, "aivcs.local");
+        assert_eq!(config.user, "aivcs");
+        assert_eq!(config.repo_name, "my-repo");
     }
 }

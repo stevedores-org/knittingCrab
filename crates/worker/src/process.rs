@@ -6,6 +6,7 @@ use tokio::time::timeout;
 use tracing;
 
 use knitting_crab_core::event::LogSource;
+use knitting_crab_core::execution_location::ExecutionLocation;
 use knitting_crab_core::ids::TaskId;
 use knitting_crab_core::retry::ExitOutcome;
 use knitting_crab_core::traits::EventSink;
@@ -19,6 +20,7 @@ pub struct SpawnParams {
     pub command: Vec<String>,
     pub working_dir: PathBuf,
     pub env: std::collections::HashMap<String, String>,
+    pub location: ExecutionLocation,
 }
 
 /// Handle to a running process.
@@ -236,6 +238,7 @@ mod tests {
             command: vec!["echo".to_string(), "hello world".to_string()],
             working_dir: PathBuf::from("/tmp"),
             env: Default::default(),
+            location: ExecutionLocation::default(),
         };
 
         let mut handle = spawn(params, sink.clone()).await.unwrap();
@@ -265,6 +268,7 @@ mod tests {
             command: vec!["sh".to_string(), "-c".to_string(), "exit 0".to_string()],
             working_dir: PathBuf::from("/tmp"),
             env: Default::default(),
+            location: ExecutionLocation::default(),
         };
 
         let mut handle = spawn(params, sink).await.unwrap();
@@ -284,6 +288,7 @@ mod tests {
             command: vec!["sh".to_string(), "-c".to_string(), "exit 42".to_string()],
             working_dir: PathBuf::from("/tmp"),
             env: Default::default(),
+            location: ExecutionLocation::default(),
         };
 
         let mut handle = spawn(params, sink).await.unwrap();
@@ -308,6 +313,7 @@ mod tests {
             ],
             working_dir: PathBuf::from("/tmp"),
             env: Default::default(),
+            location: ExecutionLocation::default(),
         };
 
         let mut handle = spawn(params, sink).await.unwrap();
@@ -342,6 +348,7 @@ mod tests {
             command: vec!["sleep".to_string(), "30".to_string()],
             working_dir: PathBuf::from("/tmp"),
             env: Default::default(),
+            location: ExecutionLocation::default(),
         };
 
         let mut handle = spawn(params, sink).await.unwrap();
@@ -381,6 +388,7 @@ mod tests {
             ],
             working_dir: PathBuf::from("/tmp"),
             env,
+            location: ExecutionLocation::default(),
         };
 
         let mut handle = spawn(params, sink.clone()).await.unwrap();
@@ -411,6 +419,7 @@ mod tests {
             command: vec!["pwd".to_string()],
             working_dir: PathBuf::from("/tmp"),
             env: Default::default(),
+            location: ExecutionLocation::default(),
         };
 
         let mut handle = spawn(params, sink.clone()).await.unwrap();
@@ -445,6 +454,7 @@ mod tests {
             ],
             working_dir: PathBuf::from("/tmp"),
             env: Default::default(),
+            location: ExecutionLocation::default(),
         };
 
         let mut handle = spawn(params, sink.clone()).await.unwrap();
@@ -481,6 +491,7 @@ mod tests {
             ],
             working_dir: PathBuf::from("/tmp"),
             env: Default::default(),
+            location: ExecutionLocation::default(),
         };
 
         let mut handle = spawn(params, sink.clone()).await.unwrap();
@@ -516,6 +527,7 @@ mod tests {
             command: vec!["nonexistent_command_12345".to_string()],
             working_dir: PathBuf::from("/tmp"),
             env: Default::default(),
+            location: ExecutionLocation::default(),
         };
 
         let result = spawn(params, sink).await;
