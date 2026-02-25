@@ -92,6 +92,7 @@ mod tests {
             is_critical: false,
             priority: knitting_crab_core::Priority::Normal,
             dependencies: vec![],
+            location: Default::default(),
         };
 
         scheduler.enqueue(task.clone()).unwrap();

@@ -1,6 +1,6 @@
 # CI/CD Setup for knittingCrab
 
-This project uses GitHub Actions for continuous integration and local git hooks for pre-commit validation.
+This project uses **GitHub Actions** for continuous integration, **local-ci** for pre-push validation, and **git hooks** for pre-commit checks.
 
 ## GitHub Actions Workflow
 
@@ -39,9 +39,38 @@ The `.github/workflows/ci.yml` file defines the following automated checks:
    - Validates local Mac execution environment
    - Builds and tests native Apple Silicon binaries
 
+## Local-CI Pre-push Validation
+
+**Recommended**: Use local-ci to validate all changes before pushing to GitHub.
+
+### Quick Start
+
+```bash
+# 1. Install local-ci
+brew install stevedores-org/local-ci/local-ci
+
+# 2. Run validation
+local-ci run
+
+# 3. Push when checks pass
+git push  # Pre-push hook validates again automatically
+```
+
+For detailed setup instructions, see [LOCAL_CI_SETUP.md](LOCAL_CI_SETUP.md).
+
+### What local-ci Validates
+
+- ✅ Code formatting (`cargo fmt --all -- --check`)
+- ✅ Clippy lints (`cargo clippy --all-targets --all-features -- -D warnings`)
+- ✅ Build (`cargo build --all-targets`)
+- ✅ Tests (`cargo test --all-targets && cargo test --doc`)
+- ✅ Security audit (`cargo audit`)
+
+All checks match the GitHub Actions pipeline exactly.
+
 ## Local Pre-commit Hook
 
-To enable local validation before pushing:
+Lightweight pre-commit validation (runs before committing):
 
 ```bash
 # Configure git to use local hooks
@@ -53,6 +82,20 @@ git config core.hooksPath .githooks
 ```
 
 The hook prevents commits that don't pass formatting or clippy checks, catching issues early.
+
+## Pre-push Hook (with local-ci)
+
+Comprehensive pre-push validation (runs before pushing to GitHub):
+
+```bash
+# Already configured in .githooks/pre-push
+# Automatically validates all CI stages before allowing push
+
+# To bypass (not recommended):
+git push --no-verify
+```
+
+The pre-push hook runs `local-ci run` if available, or falls back to basic cargo checks.
 
 ## Branch Protection Rules
 

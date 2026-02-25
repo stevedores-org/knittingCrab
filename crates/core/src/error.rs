@@ -45,4 +45,7 @@ pub enum CoreError {
 
     #[error("dependency failed for task {0}")]
     DependencyFailed(TaskId),
+
+    #[error("session operation failed: {0}")]
+    SessionFailed(String),
 }

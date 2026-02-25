@@ -791,6 +791,7 @@ mod tests {
             is_critical: priority.is_critical(),
             priority,
             dependencies: deps,
+            location: Default::default(),
         }
     }
 
@@ -1314,6 +1315,7 @@ mod tests {
             is_critical: false,
             priority: Priority::Normal,
             dependencies: vec![],
+            location: Default::default(),
         };
 
         // Create a smaller task
@@ -1328,6 +1330,7 @@ mod tests {
             is_critical: false,
             priority: Priority::Normal,
             dependencies: vec![],
+            location: Default::default(),
         };
 
         sched.enqueue(task_a).unwrap();
@@ -1444,6 +1447,7 @@ mod tests {
             is_critical: false,
             priority: Priority::Normal,
             dependencies: vec![],
+            location: Default::default(),
         };
 
         sched.enqueue(task).unwrap();
