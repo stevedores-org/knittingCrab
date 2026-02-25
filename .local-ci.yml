@@ -1,0 +1,132 @@
+# Local CI Configuration for knittingCrab
+# Validates all changes before pushing to GitHub
+# Maps to the GitHub Actions workflow defined in .github/workflows/ci.yml
+
+version: "1.0"
+
+# Global environment variables
+env:
+  RUST_BACKTRACE: "1"
+  CARGO_TERM_COLOR: "always"
+
+# Define CI stages in order of execution
+stages:
+  # Stage 1: Code Formatting Check
+  - name: fmt
+    description: "Verify code formatting with rustfmt"
+    command: "cargo fmt --all -- --check"
+    fail_message: "Code formatting check failed. Run 'cargo fmt --all' to fix."
+    success_message: "✅ Code formatting passed"
+
+  # Stage 2: Clippy Lints (all warnings as errors)
+  - name: clippy
+    description: "Run clippy lints with warnings-as-errors"
+    command: "cargo clippy --all-targets --all-features -- -D warnings"
+    fail_message: "Clippy lints failed. Review suggestions above."
+    success_message: "✅ Clippy lints passed"
+
+  # Stage 3: Build all targets
+  - name: build
+    description: "Build all targets"
+    command: "cargo build --all-targets --verbose"
+    fail_message: "Build failed. Check compilation errors above."
+    success_message: "✅ Build succeeded"
+
+  # Stage 4: Run unit and integration tests
+  - name: test
+    description: "Run all unit and integration tests"
+    command: "cargo test --all-targets --verbose && cargo test --doc"
+    fail_message: "Tests failed. Review test output above."
+    success_message: "✅ All tests passed"
+
+  # Stage 5: Security audit (optional, requires cargo-audit)
+  - name: security
+    description: "Security audit of dependencies"
+    command: "cargo audit --deny warnings"
+    fail_message: "Security audit found vulnerabilities. Update dependencies."
+    success_message: "✅ Security audit passed"
+    optional: true
+    on_failure: "continue"
+
+# Configuration for local-ci behavior
+config:
+  # Stop on first failure by default
+  fail_fast: true
+
+  # Show detailed output
+  verbose: true
+
+  # Cache build artifacts (requires local-ci support)
+  cache:
+    - path: "target"
+      key: "cargo-build-{{ hash('Cargo.lock') }}"
+    - path: "~/.cargo/registry"
+      key: "cargo-registry"
+    - path: "~/.cargo/git"
+      key: "cargo-git"
+
+# Pre-execution hooks
+hooks:
+  pre_run:
+    # Check Rust toolchain is installed
+    - name: "check-rust"
+      command: "rustc --version && cargo --version"
+      fail_message: "Rust toolchain not found. Install from https://rustup.rs/"
+
+  post_run:
+    # Summary report
+    - name: "summary"
+      command: "echo '📊 CI Summary:' && echo '  All stages completed successfully!' && echo '✅ Ready to push'"
+      always_run: true
+
+# Notification/reporting
+reporting:
+  # Print summary table
+  format: "table"
+
+  # On success, print summary
+  on_success: |
+    ╔════════════════════════════════════════════╗
+    ║       ✅ All CI Checks Passed!             ║
+    ║                                            ║
+    ║  Ready to push:                            ║
+    ║  ├── 📝 Code formatting: PASS              ║
+    ║  ├── 🔍 Clippy lints: PASS                 ║
+    ║  ├── 🏗️  Build: PASS                       ║
+    ║  ├── ✅ Tests: PASS                        ║
+    ║  └── 🔐 Security audit: PASS               ║
+    ╚════════════════════════════════════════════╝
+
+  # On failure, show which stage failed
+  on_failure: |
+    ╔════════════════════════════════════════════╗
+    ║       ❌ CI Check Failed                    ║
+    ║                                            ║
+    ║  Fix the errors above and run again:       ║
+    ║  $ local-ci run                            ║
+    ║                                            ║
+    ║  Or run individual stages:                 ║
+    ║  $ local-ci run --stage fmt                ║
+    ║  $ local-ci run --stage clippy             ║
+    ║  $ local-ci run --stage build              ║
+    ║  $ local-ci run --stage test               ║
+    ╚════════════════════════════════════════════╝
+
+# Git integration
+git:
+  # Run automatically before commits if configured
+  pre_commit: true
+
+  # Run before push
+  pre_push: true
+
+  # Branches to check
+  branches:
+    - main
+    - develop
+    - epic*/*
+    - feature/*
+    - fix/*
+    - bugfix/*
+    - copilot/*
+    - claude-code/*

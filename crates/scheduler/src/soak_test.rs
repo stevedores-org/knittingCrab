@@ -47,6 +47,7 @@ fn make_test_task(id: TaskId, priority: Priority, deps: Vec<TaskId>) -> TaskDesc
         is_critical: priority.is_critical(),
         priority,
         dependencies: deps,
+        location: Default::default(),
     }
 }
 

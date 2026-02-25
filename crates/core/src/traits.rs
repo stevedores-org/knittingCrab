@@ -32,6 +32,11 @@ pub struct TaskDescriptor {
     /// Task IDs that must complete before this task can run.
     #[serde(default)]
     pub dependencies: Vec<TaskId>,
+
+    /// Where this task should execute (Local or Remote).
+    /// Defaults to Local for backward compatibility.
+    #[serde(default)]
+    pub location: ExecutionLocation,
 }
 
 /// A queue that stores and distributes tasks to workers.
@@ -89,6 +94,62 @@ pub trait EventSink: Send + Sync + 'static {
     async fn emit_log(&self, log: LogLine) -> Result<(), CoreError>;
 }
 
+/// Opaque handle to a live remote session.
+#[derive(Debug, Clone)]
+pub struct SessionHandle {
+    pub session_name: String,
+}
+
+/// Result of running a command in a remote session.
+#[derive(Debug, Clone)]
+pub struct ExecutionResult {
+    pub exit_code: i32,
+    pub stdout: String,
+    pub stderr: String,
+}
+
+/// Where a task should execute.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
+pub enum ExecutionLocation {
+    #[default]
+    Local,
+    Remote(RemoteSessionConfig),
+}
+
+/// Config for a remote execution target.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct RemoteSessionConfig {
+    pub host: String,
+    pub user: String,
+    pub repo_name: String,
+    pub work_id: String,
+    pub role: RemoteRole,
+}
+
+/// Role of a remote session (mirrors aivcs-session::Role).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
+pub enum RemoteRole {
+    #[default]
+    Runner, // disposable, killed after task
+    Agent, // long-lived, survives task
+    Human, // manual intervention
+}
+
+/// Manages lifecycle of remote tmux sessions.
+#[async_trait]
+pub trait RemoteSessionManager: Send + Sync + 'static {
+    async fn create_or_attach(
+        &self,
+        config: &RemoteSessionConfig,
+    ) -> Result<SessionHandle, CoreError>;
+    async fn run_command(
+        &self,
+        session: &SessionHandle,
+        cmd: &str,
+    ) -> Result<ExecutionResult, CoreError>;
+    async fn kill_session(&self, session: &SessionHandle) -> Result<(), CoreError>;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -107,6 +168,7 @@ mod tests {
             is_critical: false,
             priority: Priority::Normal,
             dependencies: vec![],
+            location: ExecutionLocation::Local,
         };
 
         assert_eq!(desc.task_id, task_id);
@@ -129,6 +191,7 @@ mod tests {
             is_critical: true,
             priority: Priority::Critical,
             dependencies: vec![],
+            location: ExecutionLocation::Local,
         };
 
         assert!(desc.is_critical);

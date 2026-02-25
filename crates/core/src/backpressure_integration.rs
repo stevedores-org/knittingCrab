@@ -133,6 +133,7 @@ mod tests {
             is_critical,
             priority,
             dependencies: vec![],
+            location: Default::default(),
         }
     }
 
