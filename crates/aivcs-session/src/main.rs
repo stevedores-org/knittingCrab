@@ -2,7 +2,7 @@ mod remote;
 mod session;
 
 use clap::{Parser, Subcommand};
-use remote::{RemoteSessionManager, RemoteTarget};
+use remote::{RemoteTarget, SshTmuxSessionManager};
 use session::SessionConfig;
 use tracing_subscriber::fmt;
 
@@ -97,7 +97,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let role = role.parse()?;
             let config = SessionConfig::new(repo, work_id, role)?;
             let remote = RemoteTarget::new(host, user)?;
-            let manager = RemoteSessionManager::new(remote);
+            let manager = SshTmuxSessionManager::new(remote);
 
             let session_name = manager.attach_or_create(&config).await?;
             println!("{}", session_name);
@@ -106,7 +106,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         Commands::List { host, user } => {
             let remote = RemoteTarget::new(host, user)?;
-            let manager = RemoteSessionManager::new(remote);
+            let manager = SshTmuxSessionManager::new(remote);
 
             let sessions = manager.list_sessions().await?;
             for session in sessions {
@@ -121,7 +121,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             user,
         } => {
             let remote = RemoteTarget::new(host, user)?;
-            let manager = RemoteSessionManager::new(remote);
+            let manager = SshTmuxSessionManager::new(remote);
 
             manager.kill_session(&session).await?;
             println!("Killed session: {}", session);

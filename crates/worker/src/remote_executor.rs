@@ -240,6 +240,7 @@ mod tests {
             command: vec!["echo".to_string(), "test".to_string()],
             working_dir: PathBuf::from("/tmp"),
             env: Default::default(),
+            location: Default::default(),
         };
 
         let sink = Arc::new(TestSink);

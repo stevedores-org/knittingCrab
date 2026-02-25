@@ -1,17 +1,23 @@
 pub mod cancel_token;
+pub mod dispatching_executor;
 pub mod error;
+pub mod fake_session_manager;
 pub mod fake_worker;
 pub mod lease_manager;
 pub mod process;
 pub mod remote_executor;
 pub mod retry_handler;
+pub mod ssh_tmux_executor;
 pub mod worker_runtime;
 
 pub use cancel_token::{CancelGuard, CancelToken};
+pub use dispatching_executor::DispatchingExecutor;
 pub use error::WorkerError;
+pub use fake_session_manager::{ExitCodeBehavior, FakeRemoteSessionManager};
 pub use fake_worker::FakeWorker;
 pub use lease_manager::{InMemoryLeaseStore, LeaseManager};
 pub use process::{spawn, ProcessHandle, SpawnParams};
-pub use remote_executor::{FakeRemoteSessionManager, RemoteProcessExecutor};
+pub use remote_executor::RemoteProcessExecutor;
 pub use retry_handler::RetryHandler;
+pub use ssh_tmux_executor::SshTmuxSessionExecutor;
 pub use worker_runtime::{ProcessExecutor, RealProcessExecutor, WorkerRuntime};

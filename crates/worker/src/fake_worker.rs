@@ -354,6 +354,7 @@ mod tests {
             command: vec!["echo".to_string()],
             working_dir: std::path::PathBuf::from("/tmp"),
             env: Default::default(),
+            location: knitting_crab_core::ExecutionLocation::default(),
         };
         let sink = Arc::new(FakeWorker::new()) as Arc<dyn knitting_crab_core::traits::EventSink>;
         let (_token, guard) = CancelToken::new();
@@ -384,6 +385,7 @@ mod tests {
             command: vec!["echo".to_string()],
             working_dir: std::path::PathBuf::from("/tmp"),
             env: Default::default(),
+            location: knitting_crab_core::ExecutionLocation::default(),
         };
         let sink = Arc::new(FakeWorker::new()) as Arc<dyn knitting_crab_core::traits::EventSink>;
         let (_token, guard) = CancelToken::new();
@@ -408,6 +410,7 @@ mod tests {
             command: vec!["echo".to_string()],
             working_dir: std::path::PathBuf::from("/tmp"),
             env: Default::default(),
+            location: knitting_crab_core::ExecutionLocation::default(),
         };
         let sink = Arc::new(FakeWorker::new()) as Arc<dyn knitting_crab_core::traits::EventSink>;
         let (_token, guard) = CancelToken::new();
@@ -432,6 +435,7 @@ mod tests {
             command: vec!["echo".to_string()],
             working_dir: std::path::PathBuf::from("/tmp"),
             env: Default::default(),
+            location: knitting_crab_core::ExecutionLocation::default(),
         };
         let sink = Arc::new(FakeWorker::new()) as Arc<dyn knitting_crab_core::traits::EventSink>;
         let (_token, guard) = CancelToken::new();
@@ -455,6 +459,7 @@ mod tests {
             command: vec!["echo".to_string()],
             working_dir: std::path::PathBuf::from("/tmp"),
             env: Default::default(),
+            location: knitting_crab_core::ExecutionLocation::default(),
         };
         let sink = Arc::new(FakeWorker::new()) as Arc<dyn knitting_crab_core::traits::EventSink>;
         let (token, guard) = CancelToken::new();
@@ -482,6 +487,7 @@ mod tests {
             command: vec!["echo".to_string()],
             working_dir: std::path::PathBuf::from("/tmp"),
             env: Default::default(),
+            location: knitting_crab_core::ExecutionLocation::default(),
         };
         let sink = Arc::new(FakeWorker::new()) as Arc<dyn knitting_crab_core::traits::EventSink>;
         let (token, guard) = CancelToken::new();

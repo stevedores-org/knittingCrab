@@ -2,10 +2,11 @@
 
 use crate::session::{SessionConfig, SessionError};
 use async_trait::async_trait;
-use knitting_crab_core::traits::RemoteSessionManager as RemoteSessionManagerTrait;
-use knitting_crab_core::{
-    CoreError, ExecutionResult, RemoteRole, RemoteSessionConfig, SessionHandle,
+use knitting_crab_core::error::CoreError;
+use knitting_crab_core::traits::{
+    RemoteSessionManager as RemoteSessionManagerTrait2, RemoteSessionManagerTrait,
 };
+use knitting_crab_core::{ExecutionResult, RemoteRole, RemoteSessionConfig, SessionHandle};
 use std::process::Command;
 use tracing::{debug, info};
 
@@ -79,17 +80,17 @@ impl RemoteTarget {
 }
 
 /// Session manager for remote tmux sessions.
-pub struct RemoteSessionManager {
+pub struct SshTmuxSessionManager {
     remote: RemoteTarget,
 }
 
-impl Default for RemoteSessionManager {
+impl Default for SshTmuxSessionManager {
     fn default() -> Self {
         Self::new(RemoteTarget::default())
     }
 }
 
-impl RemoteSessionManager {
+impl SshTmuxSessionManager {
     pub fn new(remote: RemoteTarget) -> Self {
         Self { remote }
     }
@@ -276,11 +277,112 @@ impl RemoteSessionManager {
             stderr,
         })
     }
+
+    /// Run a command in a session window (for RemoteSessionManagerTrait).
+    pub async fn run_command_in_session(
+        &self,
+        session_name: &str,
+        window_name: &str,
+        command: &str,
+        _sentinel_path: &str,
+    ) -> Result<(), SessionError> {
+        let tmux = self.remote.tmux_binary();
+        let ssh_target = self.remote.ssh_target().to_string();
+        let session_name_owned = session_name.to_string();
+        let window_name_owned = window_name.to_string();
+        let command_owned = command.to_string();
+
+        let output = tokio::task::spawn_blocking(move || {
+            let escaped_session = shell_escape::unix::escape(session_name_owned.as_str().into());
+            let escaped_window = shell_escape::unix::escape(window_name_owned.as_str().into());
+            let escaped_command = shell_escape::unix::escape(command_owned.as_str().into());
+
+            let tmux_command = format!(
+                "{} send-keys -t {}:{} {} Enter",
+                tmux, escaped_session, escaped_window, escaped_command
+            );
+
+            Command::new("ssh")
+                .args(["-o", "ConnectTimeout=5"])
+                .arg(&ssh_target)
+                .arg(tmux_command)
+                .output()
+        })
+        .await
+        .map_err(|e| SessionError::ConnectionFailed(format!("spawn_blocking failed: {}", e)))?
+        .map_err(|e| SessionError::ConnectionFailed(e.to_string()))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(SessionError::TmuxFailed(stderr.to_string()));
+        }
+
+        Ok(())
+    }
+
+    /// Poll for exit code via sentinel file (for RemoteSessionManagerTrait).
+    pub async fn poll_exit_code(&self, sentinel_path: &str) -> Result<Option<i32>, SessionError> {
+        let ssh_target = self.remote.ssh_target().to_string();
+        let sentinel_owned = sentinel_path.to_string();
+
+        let output = tokio::task::spawn_blocking(move || {
+            let escaped_path = shell_escape::unix::escape(sentinel_owned.as_str().into());
+            let command = format!(
+                "test -f {} && cat {} || echo NOFILE",
+                escaped_path, escaped_path
+            );
+
+            Command::new("ssh")
+                .args(["-o", "ConnectTimeout=5"])
+                .arg(&ssh_target)
+                .arg(command)
+                .output()
+        })
+        .await
+        .map_err(|e| SessionError::ConnectionFailed(format!("spawn_blocking failed: {}", e)))?
+        .map_err(|e| SessionError::ConnectionFailed(e.to_string()))?;
+
+        if !output.status.success() {
+            return Ok(None);
+        }
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let output_str = stdout.trim();
+
+        if output_str == "NOFILE" {
+            Ok(None)
+        } else {
+            match output_str.parse::<i32>() {
+                Ok(code) => Ok(Some(code)),
+                Err(_) => Ok(None),
+            }
+        }
+    }
+
+    /// Cleanup sentinel file (for RemoteSessionManagerTrait).
+    pub async fn cleanup_sentinel(&self, sentinel_path: &str) -> Result<(), SessionError> {
+        let ssh_target = self.remote.ssh_target().to_string();
+        let sentinel_owned = sentinel_path.to_string();
+
+        let _output = tokio::task::spawn_blocking(move || {
+            let escaped_path = shell_escape::unix::escape(sentinel_owned.as_str().into());
+            Command::new("ssh")
+                .args(["-o", "ConnectTimeout=5"])
+                .arg(&ssh_target)
+                .arg(format!("rm -f {}", escaped_path))
+                .output()
+        })
+        .await
+        .map_err(|e| SessionError::ConnectionFailed(format!("spawn_blocking failed: {}", e)))?
+        .map_err(|e| SessionError::ConnectionFailed(e.to_string()))?;
+
+        Ok(())
+    }
 }
 
-/// Implement RemoteSessionManager trait from knitting-crab-core for the aivcs RemoteSessionManager.
+/// Implement RemoteSessionManager trait (synchronous command execution).
 #[async_trait]
-impl RemoteSessionManagerTrait for RemoteSessionManager {
+impl RemoteSessionManagerTrait2 for SshTmuxSessionManager {
     async fn create_or_attach(
         &self,
         config: &RemoteSessionConfig,
@@ -315,7 +417,64 @@ impl RemoteSessionManagerTrait for RemoteSessionManager {
     }
 
     async fn kill_session(&self, session: &SessionHandle) -> Result<(), CoreError> {
-        self.kill_session(&session.session_name)
+        SshTmuxSessionManager::kill_session(self, &session.session_name)
+            .await
+            .map_err(|e| CoreError::SessionFailed(e.to_string()))
+    }
+}
+
+/// Implement RemoteSessionManagerTrait (sentinel-based async polling).
+#[async_trait]
+impl RemoteSessionManagerTrait for SshTmuxSessionManager {
+    async fn ensure_session(
+        &self,
+        config: &knitting_crab_core::SessionConfig,
+    ) -> Result<String, CoreError> {
+        // Convert from core::SessionConfig to aivcs_session::SessionConfig
+        let session_config = SessionConfig::new(
+            config.repo_name.clone(),
+            "default_work_id".to_string(), // Default work_id
+            crate::session::Role::Agent,   // Default role
+        )
+        .map_err(|e| CoreError::SessionFailed(e.to_string()))?;
+
+        self.attach_or_create(&session_config)
+            .await
+            .map_err(|e| CoreError::SessionFailed(e.to_string()))
+    }
+
+    async fn run_command_in_session(
+        &self,
+        session_name: &str,
+        window_name: &str,
+        command: &str,
+        sentinel_path: &str,
+    ) -> Result<(), CoreError> {
+        SshTmuxSessionManager::run_command_in_session(
+            self,
+            session_name,
+            window_name,
+            command,
+            sentinel_path,
+        )
+        .await
+        .map_err(|e| CoreError::SessionFailed(e.to_string()))
+    }
+
+    async fn poll_exit_code(&self, sentinel_path: &str) -> Result<Option<i32>, CoreError> {
+        SshTmuxSessionManager::poll_exit_code(self, sentinel_path)
+            .await
+            .map_err(|e| CoreError::SessionFailed(e.to_string()))
+    }
+
+    async fn cleanup_sentinel(&self, sentinel_path: &str) -> Result<(), CoreError> {
+        SshTmuxSessionManager::cleanup_sentinel(self, sentinel_path)
+            .await
+            .map_err(|e| CoreError::SessionFailed(e.to_string()))
+    }
+
+    async fn kill_session(&self, session_name: &str) -> Result<(), CoreError> {
+        SshTmuxSessionManager::kill_session(self, session_name)
             .await
             .map_err(|e| CoreError::SessionFailed(e.to_string()))
     }
@@ -346,7 +505,7 @@ mod tests {
 
     #[test]
     fn test_session_manager_creation() {
-        let manager = RemoteSessionManager::default();
+        let manager = SshTmuxSessionManager::default();
         assert_eq!(manager.remote.ssh_target(), "aivcs@aivcs.local");
     }
 
@@ -357,7 +516,7 @@ mod tests {
     async fn test_trait_impl_session_handle() {
         // This test verifies that the trait implementation can be called
         // without requiring actual SSH/tmux (it will fail without real connection)
-        let manager = RemoteSessionManager::default();
+        let manager = SshTmuxSessionManager::default();
         let config = RemoteSessionConfig {
             host: "aivcs.local".to_string(),
             user: "aivcs".to_string(),
@@ -368,7 +527,7 @@ mod tests {
 
         // This would fail without actual SSH connection, so we just verify the type checks
         let _config_ref: &RemoteSessionConfig = &config;
-        let _manager_ref: &dyn RemoteSessionManagerTrait = &manager;
+        let _manager_ref: &dyn RemoteSessionManagerTrait2 = &manager;
     }
 
     #[test]

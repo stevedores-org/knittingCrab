@@ -276,6 +276,7 @@ impl<
             command: task.command.clone(),
             working_dir: task.working_dir.clone(),
             env: task.env.clone(),
+            location: task.location.clone(),
         };
 
         let outcome = self

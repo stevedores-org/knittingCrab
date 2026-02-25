@@ -4,14 +4,14 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
+async-trait = { workspace = true }
 clap = { version = "4", features = ["derive"] }
+knitting-crab-core = { path = "../core" }
 tokio = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 shell-escape = "0.1"
-async-trait = { workspace = true }
-knitting-crab-core = { path = "../core" }
 
 [dev-dependencies]
 tokio-test = { workspace = true }
