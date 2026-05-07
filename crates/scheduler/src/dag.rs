@@ -312,6 +312,7 @@ impl Inner {
 
     /// Detect cycles using white/gray/black DFS. Returns Some(task_id) if cycle found.
     fn detect_cycle(&self) -> Option<TaskId> {
+        #[derive(Copy, Clone, PartialEq, Eq)]
         enum Color {
             White,
             Gray,
@@ -329,12 +330,10 @@ impl Inner {
             colors.insert(node, Color::Gray);
 
             for &dep_id in &tasks[&node].dependencies {
-                match colors.get(&dep_id) {
+                match colors.get(&dep_id).copied() {
                     Some(Color::Gray) => return Some(dep_id),
-                    Some(Color::White) => {
-                        if dfs(dep_id, colors, tasks).is_some() {
-                            return Some(dep_id);
-                        }
+                    Some(Color::White) if dfs(dep_id, colors, tasks).is_some() => {
+                        return Some(dep_id);
                     }
                     _ => {}
                 }
