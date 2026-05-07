@@ -21,7 +21,7 @@ To use the `nix-cache.stevedores.org` attic cache for faster builds, you need to
 
 ```nix
 substituters = https://nix-cache.stevedores.org/ https://cache.nixos.org/
-trusted-public-keys = nix-cache.stevedores.org:<PUBLIC_KEY> cache.nixos.org-1:6NCHdD59X431o0gWypG7a9Tv8sfqncan61pXZx54MKA=
+trusted-public-keys = stevedores-1:ZEtb+wHYNR/LDmMDhF3/EpRZDNma8exY2b1TGZ6uS2A= cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY=
 ```
 
 3. Restart the nix daemon:
