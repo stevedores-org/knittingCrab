@@ -53,10 +53,22 @@ impl ProcessExecutor for SshTmuxSessionExecutor {
         let window_name = "main";
 
         // Ensure session exists
-        let config = SessionConfig {
-            host: "aivcs.local".to_string(),
-            user: "aivcs".to_string(),
-            repo_name: "unknown".to_string(), // TODO: pass from params
+        let config = match &params.location {
+            knitting_crab_core::execution_location::ExecutionLocation::RemoteSession(target) => {
+                SessionConfig {
+                    host: target.host.clone(),
+                    user: target.user.clone(),
+                    repo_name: target.repo_name.clone(),
+                }
+            }
+            _ => {
+                // Default fallback if somehow called for local task
+                SessionConfig {
+                    host: "aivcs.local".to_string(),
+                    user: "aivcs".to_string(),
+                    repo_name: "unknown".to_string(),
+                }
+            }
         };
 
         self.session_manager
