@@ -1,0 +1,8 @@
+# knittingCrab — Cursor IDE Rules
+
+- **Rust Language**: Always generate idiomatic Rust 2021. Use async/await and Tokio.
+- **Testing**: When adding logic, also generate a unit test in a `#[cfg(test)]` module within the same file.
+- **Project Structure**: Respect the `crates/` directory layout. Do not add code to the top-level `src/` directory (it is legacy).
+- **Traits**: Use trait-based design for major components to enable easy mocking.
+- **Context**: Always load `CLAUDE.md` and `GEMINI.md` for architectural context.
+- **Clippy**: All generated code must be clippy-clean.
