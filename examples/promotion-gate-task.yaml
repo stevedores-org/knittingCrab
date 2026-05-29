@@ -1,0 +1,20 @@
+apiVersion: agent.lornu.ai/v1
+kind: AgentTask
+metadata:
+  name: boots-phase-2-promotion-gate
+  namespace: bullpen
+spec:
+  title: "Phase 2 Promotion: Boots Agent"
+  goal: "Verify Boots agent health on production-grade infrastructure"
+  instruction: "Run comprehensive health check suite against the staging cluster"
+  priority: High
+  requiredCapabilities: ["health-check", "platform-ops"]
+  evaluation:
+    aivcsRunId: "run-boots-promotion-001"
+    rubricPath: "/docs/evaluations/boots-phase-2-rubric.yaml"
+    isPromotionGate: true
+    agentPhase: 2
+  context:
+    repos: ["lornu-ai/bullpen"]
+    values:
+      target_cluster: "staging-eks"

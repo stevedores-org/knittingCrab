@@ -176,10 +176,16 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for implementation details.
 - Epic 6: Observability + UX (status CLI, event timelines, causal reasoning)
 - Epic 7: Soak testing + metrics validation
 
-**Next** (Phase 3):
-- aivcs-session CLI tool (SSH/tmux session manager)
-- Scheduler integration with remote workers
-- Multi-machine orchestration
+## Production Evaluations & Bullpen Migration
+
+knittingCrab supports rigorous agent evaluations for the Lornu AI bullpen:
+
+- **Evaluation Metadata**: Tasks can carry AIVCS run IDs and success rubrics to track promotion cycles.
+- **Roster Gatekeeper**: Enforces node isolation policy. Phase 1/2 (nursery) agents are restricted to development nodes, while Phase 3/4 agents and explicit **Promotion Gates** are permitted on production hardware.
+- **AIVCS Integration**: Every task event can be recorded in the content-addressed sovereign ledger for auditability.
+
+See `examples/promotion-gate-task.yaml` for an example evaluation task.
+
 
 ## License
 
