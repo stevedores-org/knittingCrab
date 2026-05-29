@@ -263,6 +263,7 @@ mod tests {
             priority,
             dependencies: vec![],
             location: Default::default(),
+            evaluation: Default::default(),
         }
     }
 

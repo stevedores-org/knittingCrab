@@ -35,6 +35,7 @@ impl NodeConnection {
             worker_id,
             hostname: hostname.clone(),
             capacity: capacity.clone(),
+            is_production: false,
         };
         transport
             .send_message(&req)
@@ -115,6 +116,7 @@ impl NodeConnection {
                         worker_id: conn.worker_id,
                         hostname: conn.hostname.clone(),
                         capacity: conn.capacity.clone(),
+                        is_production: false,
                     };
                     if let Ok(()) = transport.send_message(&req).await {
                         if let Ok(Some(CoordinatorResponse::Ok)) =

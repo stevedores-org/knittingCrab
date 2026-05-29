@@ -92,6 +92,7 @@ mod tests {
             priority: knitting_crab_core::Priority::Normal,
             dependencies: vec![],
             location: Default::default(),
+            evaluation: Default::default(),
         };
         let worker_id = WorkerId::new();
 

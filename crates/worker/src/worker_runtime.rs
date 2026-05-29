@@ -441,6 +441,7 @@ mod tests {
             priority: knitting_crab_core::Priority::Normal,
             dependencies: vec![],
             location: Default::default(),
+            evaluation: Default::default(),
         };
 
         queue.enqueue(task.clone());
@@ -556,6 +557,7 @@ mod tests {
             priority: knitting_crab_core::Priority::Normal,
             dependencies: vec![],
             location: Default::default(),
+            evaluation: Default::default(),
         };
 
         // Execute task
@@ -601,6 +603,7 @@ mod tests {
             priority: knitting_crab_core::Priority::Normal,
             dependencies: vec![],
             location: Default::default(),
+            evaluation: Default::default(),
         };
 
         // Enqueue and then cancel
@@ -717,6 +720,7 @@ mod tests {
             priority: knitting_crab_core::Priority::Normal,
             dependencies: Vec::new(),
             location: Default::default(),
+            evaluation: Default::default(),
         };
 
         // Enqueue task (so FakeWorker can find it during requeue)

@@ -22,6 +22,7 @@ fn make_descriptor(task_id: TaskId) -> TaskDescriptor {
         priority: Priority::Normal,
         dependencies: vec![],
         location: Default::default(),
+        evaluation: Default::default(),
     }
 }
 

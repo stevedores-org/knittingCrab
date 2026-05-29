@@ -13,6 +13,8 @@ pub enum CoordinatorRequest {
         worker_id: WorkerId,
         hostname: String,
         capacity: ResourceAllocation,
+        #[serde(default)]
+        is_production: bool,
     },
     NodeHeartbeat {
         worker_id: WorkerId,
@@ -84,13 +86,15 @@ mod tests {
             worker_id: WorkerId::new(),
             hostname: "localhost".to_string(),
             capacity: ResourceAllocation::default(),
+            is_production: true,
         };
         let json = serde_json::to_string(&req).unwrap();
         let deserialized: CoordinatorRequest = serde_json::from_str(&json).unwrap();
-        assert!(matches!(
-            deserialized,
-            CoordinatorRequest::RegisterNode { .. }
-        ));
+        if let CoordinatorRequest::RegisterNode { is_production, .. } = deserialized {
+            assert!(is_production);
+        } else {
+            panic!("Expected RegisterNode request");
+        }
     }
 
     #[test]

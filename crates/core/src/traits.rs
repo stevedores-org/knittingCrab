@@ -11,6 +11,19 @@ use crate::priority::Priority;
 use crate::resource::ResourceAllocation;
 use crate::retry::RetryPolicy;
 
+/// Metadata for tasks that are part of an agent evaluation.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default, PartialEq)]
+pub struct EvaluationMetadata {
+    /// Associated AIVCS run ID for recording events.
+    pub aivcs_run_id: Option<String>,
+    /// Path to the success rubric for this evaluation.
+    pub rubric_path: Option<PathBuf>,
+    /// Whether this task is a production-promotion gate.
+    pub is_promotion_gate: bool,
+    /// Current maturity phase of the agent (1-4).
+    pub agent_phase: u8,
+}
+
 /// A task descriptor passed to a worker from the queue.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TaskDescriptor {
@@ -38,6 +51,10 @@ pub struct TaskDescriptor {
     /// Defaults to Local for backward compatibility.
     #[serde(default)]
     pub location: ExecutionLocation,
+
+    /// Evaluation-specific metadata for agent promotion loops.
+    #[serde(default)]
+    pub evaluation: EvaluationMetadata,
 }
 
 /// A queue that stores and distributes tasks to workers.
@@ -198,6 +215,7 @@ mod tests {
             priority: Priority::Normal,
             dependencies: vec![],
             location: ExecutionLocation::Local,
+            evaluation: Default::default(),
         };
 
         assert_eq!(desc.task_id, task_id);
@@ -221,6 +239,7 @@ mod tests {
             priority: Priority::Critical,
             dependencies: vec![],
             location: ExecutionLocation::Local,
+            evaluation: Default::default(),
         };
 
         assert!(desc.is_critical);
@@ -243,6 +262,7 @@ mod tests {
             priority: Priority::Normal,
             dependencies: vec![],
             location: ExecutionLocation::default(),
+            evaluation: Default::default(),
         };
 
         assert_eq!(desc.location, ExecutionLocation::Local);
@@ -268,11 +288,42 @@ mod tests {
             priority: Priority::Normal,
             dependencies: vec![],
             location: ExecutionLocation::RemoteSession(target),
+            evaluation: Default::default(),
         };
 
         let json = serde_json::to_string(&desc).unwrap();
         let deserialized: TaskDescriptor = serde_json::from_str(&json).unwrap();
         assert_eq!(desc.location, deserialized.location);
+    }
+
+    #[test]
+    fn task_descriptor_with_evaluation_metadata_serializes() {
+        let task_id = TaskId::new();
+        let eval = EvaluationMetadata {
+            aivcs_run_id: Some("run-123".to_string()),
+            rubric_path: Some(PathBuf::from("/etc/rubric.yaml")),
+            is_promotion_gate: true,
+            agent_phase: 1,
+        };
+        let desc = TaskDescriptor {
+            task_id,
+            command: vec!["eval-agent".to_string()],
+            working_dir: PathBuf::from("/tmp"),
+            env: HashMap::new(),
+            resources: ResourceAllocation::default(),
+            policy: RetryPolicy::default(),
+            attempt: 0,
+            is_critical: false,
+            priority: Priority::Normal,
+            dependencies: vec![],
+            location: ExecutionLocation::Local,
+            evaluation: eval.clone(),
+        };
+
+        let json = serde_json::to_string(&desc).unwrap();
+        let deserialized: TaskDescriptor = serde_json::from_str(&json).unwrap();
+        assert_eq!(desc.evaluation, deserialized.evaluation);
+        assert_eq!(deserialized.evaluation.aivcs_run_id, Some("run-123".to_string()));
     }
 
     #[test]

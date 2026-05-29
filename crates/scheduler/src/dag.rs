@@ -791,6 +791,7 @@ mod tests {
             priority,
             dependencies: deps,
             location: Default::default(),
+            evaluation: Default::default(),
         }
     }
 
@@ -1315,6 +1316,7 @@ mod tests {
             priority: Priority::Normal,
             dependencies: vec![],
             location: Default::default(),
+            evaluation: Default::default(),
         };
 
         // Create a smaller task
@@ -1330,6 +1332,7 @@ mod tests {
             priority: Priority::Normal,
             dependencies: vec![],
             location: Default::default(),
+            evaluation: Default::default(),
         };
 
         sched.enqueue(task_a).unwrap();
@@ -1447,6 +1450,7 @@ mod tests {
             priority: Priority::Normal,
             dependencies: vec![],
             location: Default::default(),
+            evaluation: Default::default(),
         };
 
         sched.enqueue(task).unwrap();

@@ -48,6 +48,7 @@ fn make_test_task(id: TaskId, priority: Priority, deps: Vec<TaskId>) -> TaskDesc
         priority,
         dependencies: deps,
         location: Default::default(),
+        evaluation: Default::default(),
     }
 }
 

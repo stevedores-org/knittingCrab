@@ -106,6 +106,7 @@ impl CoordinatorServer {
                 worker_id,
                 hostname,
                 capacity,
+                is_production,
             } => {
                 *registered_worker_id = Some(worker_id);
                 state
@@ -115,6 +116,7 @@ impl CoordinatorServer {
                         hostname,
                         capacity,
                         registered_at: chrono::Utc::now(),
+                        is_production,
                     });
                 CoordinatorResponse::Ok
             }
@@ -249,6 +251,7 @@ mod tests {
             worker_id: WorkerId::new(),
             hostname: "localhost".to_string(),
             capacity: Default::default(),
+            is_production: false,
         };
         let mut worker_id = None;
         let resp = CoordinatorServer::handle_request(&state, req, &mut worker_id).await;
@@ -299,6 +302,7 @@ mod tests {
             worker_id,
             hostname: "host1".to_string(),
             capacity: Default::default(),
+            is_production: false,
         };
         let mut registered = Some(worker_id);
         CoordinatorServer::handle_request(&state, req, &mut registered).await;

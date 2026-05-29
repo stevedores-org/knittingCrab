@@ -80,6 +80,7 @@ impl<P: NodeProbe> SshHealthMonitor<P> {
 mod tests {
     use super::*;
     use crate::node_registry::NodeInfo;
+    use chrono::Utc;
     use dashmap::DashMap;
     use knitting_crab_core::ids::WorkerId;
     use knitting_crab_core::resource::ResourceAllocation;
@@ -131,8 +132,10 @@ mod tests {
             worker_id: node_id,
             hostname: "localhost".to_string(),
             capacity: ResourceAllocation::default(),
-            registered_at: chrono::Utc::now(),
-        };
+            registered_at: Utc::now(),
+            is_production: false,
+            };
+
         registry.register(node_info);
 
         let fake = Arc::new(FakeProbe::new());
@@ -168,8 +171,10 @@ mod tests {
             worker_id: node_id,
             hostname: "localhost".to_string(),
             capacity: ResourceAllocation::default(),
-            registered_at: chrono::Utc::now(),
-        };
+            registered_at: Utc::now(),
+            is_production: false,
+            };
+
         registry.register(node_info);
 
         let fake = Arc::new(FakeProbe::new());
@@ -204,8 +209,10 @@ mod tests {
             worker_id: node_id,
             hostname: "localhost".to_string(),
             capacity: ResourceAllocation::default(),
-            registered_at: chrono::Utc::now(),
-        };
+            registered_at: Utc::now(),
+            is_production: false,
+            };
+
         registry.register(node_info.clone());
 
         let fake = Arc::new(FakeProbe::new());
@@ -241,8 +248,10 @@ mod tests {
             worker_id: node_id,
             hostname: "localhost".to_string(),
             capacity: ResourceAllocation::default(),
-            registered_at: chrono::Utc::now(),
-        };
+            registered_at: Utc::now(),
+            is_production: false,
+            };
+
         registry.register(node_info);
 
         let fake = Arc::new(FakeProbe::new());
@@ -284,14 +293,18 @@ mod tests {
             worker_id: node1,
             hostname: "host1".to_string(),
             capacity: ResourceAllocation::default(),
-            registered_at: chrono::Utc::now(),
-        };
+            registered_at: Utc::now(),
+            is_production: false,
+            };
+
         let info2 = NodeInfo {
             worker_id: node2,
             hostname: "host2".to_string(),
             capacity: ResourceAllocation::default(),
-            registered_at: chrono::Utc::now(),
-        };
+            registered_at: Utc::now(),
+            is_production: false,
+            };
+
 
         registry.register(info1);
         registry.register(info2);
@@ -328,8 +341,10 @@ mod tests {
             worker_id: node1,
             hostname: "host1".to_string(),
             capacity: ResourceAllocation::default(),
-            registered_at: chrono::Utc::now(),
-        };
+            registered_at: Utc::now(),
+            is_production: false,
+            };
+
 
         registry.register(info1);
 
@@ -359,8 +374,10 @@ mod tests {
             worker_id: node_id,
             hostname: "localhost".to_string(),
             capacity: ResourceAllocation::default(),
-            registered_at: chrono::Utc::now(),
-        };
+            registered_at: Utc::now(),
+            is_production: false,
+            };
+
         registry.register(node_info);
 
         // Make it unhealthy
@@ -385,8 +402,10 @@ mod tests {
             worker_id: node1,
             hostname: "host1".to_string(),
             capacity: ResourceAllocation::default(),
-            registered_at: chrono::Utc::now(),
-        };
+            registered_at: Utc::now(),
+            is_production: false,
+            };
+
 
         registry.register(info1);
 

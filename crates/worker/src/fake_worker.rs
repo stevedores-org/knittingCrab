@@ -214,6 +214,7 @@ mod tests {
             priority: knitting_crab_core::Priority::Normal,
             dependencies: vec![],
             location: Default::default(),
+            evaluation: Default::default(),
         }
     }
 
@@ -234,6 +235,7 @@ mod tests {
             priority: knitting_crab_core::Priority::Normal,
             dependencies: vec![],
             location: Default::default(),
+            evaluation: Default::default(),
         };
 
         worker.enqueue(task.clone());

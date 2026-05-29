@@ -21,6 +21,7 @@ pub struct NodeInfo {
     pub hostname: String,
     pub capacity: ResourceAllocation,
     pub registered_at: DateTime<Utc>,
+    pub is_production: bool,
 }
 
 pub struct NodeRegistry {
@@ -137,6 +138,7 @@ mod tests {
             hostname: "localhost".to_string(),
             capacity: ResourceAllocation::default(),
             registered_at: Utc::now(),
+            is_production: false,
         };
         registry.register(info.clone());
         assert!(registry.get_node_info(&info.worker_id).is_some());
@@ -151,6 +153,7 @@ mod tests {
             hostname: "localhost".to_string(),
             capacity: ResourceAllocation::default(),
             registered_at: Utc::now(),
+            is_production: false,
         };
         registry.register(info);
         let first_time = registry.last_seen.get(&worker_id).map(|r| *r.value());
@@ -172,6 +175,7 @@ mod tests {
             hostname: "localhost".to_string(),
             capacity: ResourceAllocation::default(),
             registered_at: Utc::now(),
+            is_production: false,
         };
         registry.register(info);
 
@@ -193,6 +197,7 @@ mod tests {
             hostname: "localhost".to_string(),
             capacity: ResourceAllocation::default(),
             registered_at: Utc::now(),
+            is_production: false,
         };
         registry.register(info);
         registry.remove(&worker_id);
@@ -208,6 +213,7 @@ mod tests {
             hostname: "localhost".to_string(),
             capacity: ResourceAllocation::default(),
             registered_at: Utc::now(),
+            is_production: false,
         };
         registry.register(info);
         assert_eq!(registry.health_status(&worker_id), NodeHealth::Healthy);
@@ -222,6 +228,7 @@ mod tests {
             hostname: "localhost".to_string(),
             capacity: ResourceAllocation::default(),
             registered_at: Utc::now(),
+            is_production: false,
         };
         registry.register(info);
         registry.record_probe_failure(&worker_id);
@@ -237,6 +244,7 @@ mod tests {
             hostname: "localhost".to_string(),
             capacity: ResourceAllocation::default(),
             registered_at: Utc::now(),
+            is_production: false,
         };
         registry.register(info);
         registry.record_probe_failure(&worker_id);
@@ -254,6 +262,7 @@ mod tests {
             hostname: "localhost".to_string(),
             capacity: ResourceAllocation::default(),
             registered_at: Utc::now(),
+            is_production: false,
         };
         registry.register(info);
         registry.record_probe_failure(&worker_id);
