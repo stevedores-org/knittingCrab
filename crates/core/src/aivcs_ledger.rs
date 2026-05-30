@@ -3,10 +3,10 @@
 //! Provides an event sink that records task lifecycle events into a content-addressed
 //! AIVCS run ledger, enabling auditability and sovereign feedback loops.
 
-use async_trait::async_trait;
 use crate::error::CoreError;
 use crate::event::{LogLine, TaskEvent};
 use crate::traits::EventSink;
+use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
 /// Event structure expected by the AIVCS ledger API.
@@ -37,7 +37,11 @@ impl AivcsEventSink {
 
     /// Internal helper to check if an event should be forwarded based on a run_id.
     #[allow(dead_code)]
-    async fn record_if_context_exists(&self, run_id: &Option<String>, event: &TaskEvent) -> Result<(), CoreError> {
+    async fn record_if_context_exists(
+        &self,
+        run_id: &Option<String>,
+        event: &TaskEvent,
+    ) -> Result<(), CoreError> {
         if let Some(id) = run_id {
             let aivcs_event = AivcsLedgerEvent {
                 run_id: id.clone(),
@@ -46,12 +50,15 @@ impl AivcsEventSink {
                     TaskEvent::Completed { .. } => "TASK_COMPLETED".to_string(),
                     _ => "TASK_EVENT".to_string(),
                 },
-                payload: serde_json::to_value(event).map_err(|e| CoreError::Internal(e.to_string()))?,
+                payload: serde_json::to_value(event)
+                    .map_err(|e| CoreError::Internal(e.to_string()))?,
                 timestamp: chrono::Utc::now(),
             };
 
             // Fire and forget (or log error) for the prototype
-            let _ = self.client.post(&self.endpoint)
+            let _ = self
+                .client
+                .post(&self.endpoint)
                 .json(&aivcs_event)
                 .send()
                 .await;

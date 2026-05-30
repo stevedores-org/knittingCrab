@@ -1,0 +1,64 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: knitting-crab-coordinator
+  namespace: knitting-crab-system
+  labels:
+    app: knitting-crab-coordinator
+    lornu.ai/component: knitting-crab
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: knitting-crab-coordinator
+  template:
+    metadata:
+      labels:
+        app: knitting-crab-coordinator
+        lornu.ai/component: knitting-crab
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: coordinator
+          image: knitting-crab-coordinator:latest # Overridden by Flux
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 4000
+              name: coordinator
+            - containerPort: 8080
+              name: health
+          envFrom:
+            - configMapRef:
+                name: knitting-crab-config
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: health
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi

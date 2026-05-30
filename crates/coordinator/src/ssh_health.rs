@@ -100,7 +100,7 @@ mod tests {
         fn add_result(&self, hostname: &str, success: bool) {
             self.outcomes
                 .entry(hostname.to_string())
-                .or_insert_with(Vec::default)
+                .or_default()
                 .push(success);
         }
     }
@@ -134,7 +134,7 @@ mod tests {
             capacity: ResourceAllocation::default(),
             registered_at: Utc::now(),
             is_production: false,
-            };
+        };
 
         registry.register(node_info);
 
@@ -173,7 +173,7 @@ mod tests {
             capacity: ResourceAllocation::default(),
             registered_at: Utc::now(),
             is_production: false,
-            };
+        };
 
         registry.register(node_info);
 
@@ -211,7 +211,7 @@ mod tests {
             capacity: ResourceAllocation::default(),
             registered_at: Utc::now(),
             is_production: false,
-            };
+        };
 
         registry.register(node_info.clone());
 
@@ -250,7 +250,7 @@ mod tests {
             capacity: ResourceAllocation::default(),
             registered_at: Utc::now(),
             is_production: false,
-            };
+        };
 
         registry.register(node_info);
 
@@ -295,7 +295,7 @@ mod tests {
             capacity: ResourceAllocation::default(),
             registered_at: Utc::now(),
             is_production: false,
-            };
+        };
 
         let info2 = NodeInfo {
             worker_id: node2,
@@ -303,8 +303,7 @@ mod tests {
             capacity: ResourceAllocation::default(),
             registered_at: Utc::now(),
             is_production: false,
-            };
-
+        };
 
         registry.register(info1);
         registry.register(info2);
@@ -343,8 +342,7 @@ mod tests {
             capacity: ResourceAllocation::default(),
             registered_at: Utc::now(),
             is_production: false,
-            };
-
+        };
 
         registry.register(info1);
 
@@ -376,7 +374,7 @@ mod tests {
             capacity: ResourceAllocation::default(),
             registered_at: Utc::now(),
             is_production: false,
-            };
+        };
 
         registry.register(node_info);
 
@@ -404,8 +402,7 @@ mod tests {
             capacity: ResourceAllocation::default(),
             registered_at: Utc::now(),
             is_production: false,
-            };
-
+        };
 
         registry.register(info1);
 

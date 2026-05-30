@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: knitting-crab-config
+  namespace: knitting-crab-system
+data:
+  RUST_LOG: "info,knitting_crab_coordinator=info"
+  COORDINATOR_ADDR: "0.0.0.0:4000"
+  HEALTH_ADDR: "0.0.0.0:8080"

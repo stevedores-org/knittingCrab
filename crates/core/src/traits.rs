@@ -323,7 +323,10 @@ mod tests {
         let json = serde_json::to_string(&desc).unwrap();
         let deserialized: TaskDescriptor = serde_json::from_str(&json).unwrap();
         assert_eq!(desc.evaluation, deserialized.evaluation);
-        assert_eq!(deserialized.evaluation.aivcs_run_id, Some("run-123".to_string()));
+        assert_eq!(
+            deserialized.evaluation.aivcs_run_id,
+            Some("run-123".to_string())
+        );
     }
 
     #[test]

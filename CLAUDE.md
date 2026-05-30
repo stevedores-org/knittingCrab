@@ -100,6 +100,14 @@ knittingCrab/
 │       │   └── error.rs             # SessionError
 │       └── tests/
 │
+│   └── coordinator/                  # Server-side scheduler state (Epic 5)
+│       ├── src/
+│       │   ├── lib.rs               # Library exports
+│       │   └── main.rs               # Binary (K8s ready)
+│       └── tests/
+│
+├── kustomize/                        # K8s manifests (base/overlays)
+├── dockworker.toml                    # Containerization config
 ├── src/                              # (Old location, being migrated to crates/)
 │   └── ...                           # Legacy code; prefer crates/ structure
 │

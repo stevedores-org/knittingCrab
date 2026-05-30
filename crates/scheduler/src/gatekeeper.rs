@@ -19,7 +19,10 @@ impl RosterGatekeeper {
 
         // Policy: Phase 1/2 agents (Local Loop / Ephemeral Hub) should be restricted to Dev nodes
         // to prevent interference with production workloads.
-        if task.evaluation.agent_phase > 0 && task.evaluation.agent_phase <= 2 && node.is_production() {
+        if task.evaluation.agent_phase > 0
+            && task.evaluation.agent_phase <= 2
+            && node.is_production()
+        {
             // Only allow if it's explicitly a promotion gate test.
             if !task.evaluation.is_promotion_gate {
                 return false;

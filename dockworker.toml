@@ -1,0 +1,35 @@
+# dockworker.ai configuration for stevedores-org/knittingCrab.
+#
+# Produces a hardened OCI image for the coordinator.
+# Workers remain on bare-metal Apple Silicon.
+
+[project]
+id = "${DOCKWORKER_PROJECT_ID}"
+name = "knitting-crab"
+
+[target.coordinator]
+context = "."
+runtime = "rust"
+# Binary name from crates/coordinator
+executable = "knitting-crab-coordinator"
+
+[target.coordinator.rust]
+# Ensure we build the specific crate
+package = "knitting-crab-coordinator"
+
+[target.coordinator.ports]
+# Main coordinator TCP port
+coordinator = 4000
+# Health probe HTTP port
+health = 8080
+
+[target.coordinator.env]
+# Default to listening on all interfaces inside the container
+COORDINATOR_ADDR = "0.0.0.0:4000"
+HEALTH_ADDR = "0.0.0.0:8080"
+RUST_LOG = "info,knitting_crab_coordinator=info"
+
+[mirror]
+# Mirror to the org's Azure Container Registry
+repository = "${ACR_NAME}.azurecr.io/knitting-crab"
+tags = ["latest", "${GIT_SHA}"]
