@@ -17,6 +17,18 @@ A resource-aware distributed task scheduler for AI agent workloads on Apple Sili
 
 **Test Coverage**: 63+ tests passing with `RUSTFLAGS="-D warnings"`, zero unsafe code outside required OS interfaces
 
+## Deployment & Containerization
+
+### Coordinator (K8s)
+The **Coordinator** is containerized for standard Kubernetes deployment:
+- **Containerization**: `dockworker.toml` at repo root produces a hardened OCI image.
+- **Packaging**: Kustomize manifests in `kustomize/` (base + overlays).
+- **GitOps**: Managed via Flux in the `lornu.ai` ecosystem.
+- **Probes**: HTTP health checks on `:8080` (`/healthz`, `/readyz`).
+
+### Workers (Bare Metal)
+**Workers** remain on bare-metal Apple Silicon hosts to ensure direct NPU/GPU access and macOS process fidelity. They connect to the Coordinator via its K8s Service address (DNS or ClusterIP).
+
 ## Quick Start
 
 ### Prerequisites

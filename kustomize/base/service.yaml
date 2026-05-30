@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: knitting-crab-coordinator
+  namespace: knitting-crab-system
+  labels:
+    app: knitting-crab-coordinator
+    lornu.ai/component: knitting-crab
+spec:
+  type: ClusterIP
+  selector:
+    app: knitting-crab-coordinator
+  ports:
+    - port: 4000
+      targetPort: coordinator
+      name: coordinator
+    - port: 8080
+      targetPort: health
+      name: health

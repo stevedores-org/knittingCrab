@@ -1,5 +1,5 @@
-pub mod aivcs_ledger;
 pub mod agent;
+pub mod aivcs_ledger;
 pub mod backpressure_integration;
 pub mod circuit_breaker;
 pub mod error;
@@ -21,8 +21,8 @@ pub mod task_timeout;
 pub mod time_slice_scheduler;
 pub mod traits;
 
-pub use aivcs_ledger::{AivcsEventSink, AivcsLedgerEvent};
 pub use agent::{AgentBudget, TestGate};
+pub use aivcs_ledger::{AivcsEventSink, AivcsLedgerEvent};
 pub use backpressure_integration::{TaskExecutionFilter, TaskRejectionReason};
 pub use circuit_breaker::{
     CircuitBreaker, CircuitBreakerConfig, CircuitBreakerStats, CircuitState,
@@ -47,7 +47,7 @@ pub use task_aging::{AgingPolicy, TaskAge};
 pub use task_timeout::{TaskTimeoutManager, TimeoutHandle, TimeoutPolicy, TimeoutStatus};
 pub use time_slice_scheduler::{SchedulerState, SchedulerStats, TimeSliceScheduler};
 pub use traits::{
-    EventSink, EvaluationMetadata, ExecutionResult, LeaseStore, Queue, RemoteRole, RemoteSessionConfig,
-    RemoteSessionManager, RemoteSessionManagerTrait, ResourceMonitor, SessionConfig, SessionHandle,
-    TaskDescriptor,
+    EvaluationMetadata, EventSink, ExecutionResult, LeaseStore, Queue, RemoteRole,
+    RemoteSessionConfig, RemoteSessionManager, RemoteSessionManagerTrait, ResourceMonitor,
+    SessionConfig, SessionHandle, TaskDescriptor,
 };
