@@ -1,204 +1,322 @@
-# knittingCrab 🦀
+> **New here?** Start with [`docs/GETTING_STARTED.md`](docs/GETTING_STARTED.md) — a first-hour guide for human developers (prerequisites, build, project structure, IDE setup, CI/CD, and making your first PR).
 
-A resource-aware distributed task scheduler for AI agent workloads on Apple Silicon with multi-machine support via SSH/tmux.
+# Local CI Validation (MANDATORY)
 
-## Status: 67% Complete (16/24 User Stories)
+All contributors must use the provided Makefile and actionlint to validate their changes locally before pushing or opening a PR.
 
-**Completed Epics**:
-- ✅ **Epic 2**: Worker Runtime — Full task lifecycle, leases, retries, graceful shutdown (18 tests)
-- ✅ **Epic 3**: Local Mac Execution — Process runner, isolation, test sharding (4 tests)
-- ✅ **Epic 4**: Cache + Artifacts — Stable keys, artifact browsing, build caching (3 tests)
-- ✅ **Epic 5**: Distribution & Scaling — Network traits, distributed coordinator, persistent recovery, resilience (circuit breaker, timeouts, backpressure, priority scheduling, priority inversion detection) (20 tests)
+## How to Validate Locally
 
-**In Progress**:
-- 🔄 **Epic 1**: Scheduler Core — DAG validation, priority + fairness, resource allocation (0/4 stories)
-- 🔄 **Epic 6**: Observability + UX — Status CLI, event timelines, tunable config (0/3 stories)
-- 🔄 **Epic 7**: Reliability & Soak — Soak tests, metrics validation (0/2 stories)
+1. **Run all checks:**
+  ```bash
+  make test
+  ```
+2. **Rust workspace (mirrors Workspace Rust Checks CI):**
+  ```bash
+  make lci
+  # Alias:
+  make local-ci
+  # If stevedores-org/local-ci CLI is installed, `make local-ci`
+  # uses `.local-ci.toml`; otherwise it falls back to tools/lci.
+  # Machine-readable output:
+  make lci-json
+  ```
+3. **Just check YAML workflows:**
+  ```bash
+  make test-yaml
+  ```
 
-**Test Coverage**: 63+ tests passing with `RUSTFLAGS="-D warnings"`, zero unsafe code outside required OS interfaces
-
-## Deployment & Containerization
-
-### Coordinator (K8s)
-The **Coordinator** is containerized for standard Kubernetes deployment:
-- **Containerization**: `dockworker.toml` at repo root produces a hardened OCI image.
-- **Packaging**: Kustomize manifests in `kustomize/` (base + overlays).
-- **GitOps**: Managed via Flux in the `lornu.ai` ecosystem.
-- **Probes**: HTTP health checks on `:8080` (`/healthz`, `/readyz`).
-
-### Workers (Bare Metal)
-**Workers** remain on bare-metal Apple Silicon hosts to ensure direct NPU/GPU access and macOS process fidelity. They connect to the Coordinator via its K8s Service address (DNS or ClusterIP).
-
-## Quick Start
-
-### Prerequisites
-- Rust 1.93+
-- macOS (M1/M2/M3/M4 or Intel)
-- Pre-commit hooks (optional)
-
-### Installation
-
+If you do not have actionlint installed:
 ```bash
-git clone https://github.com/stevedores-org/knittingCrab.git
-cd knittingCrab
-cargo build --release
+brew install actionlint
 ```
 
-### Running Tests
+For more details, see [docs/LOCAL_CI_VALIDATION.md](docs/LOCAL_CI_VALIDATION.md).
 
-```bash
-# All tests
-cargo test --all
+This workflow ensures that all documentation and YAML workflows are robust and error-free before merging to develop.
 
-# Specific crate
-cargo test -p knitting-crab-worker --lib
+## Agent Pre-Commit
 
-# With strict warnings
-RUSTFLAGS="-D warnings" cargo test --all
+All agents must run the repo pre-commit checks before committing changes.
+# **Grow Without Limits — Lornuai, Inc.**
 
-# Pre-commit checks
-pre-commit run --all-files
+## ---
+
+[![Bun](https://img.shields.io/badge/Bun-1.3+-black?logo=bun&logoColor=white)](https://bun.sh)
+[![Rust](https://img.shields.io/badge/Rust-1.80+-CE412B?logo=rust&logoColor=white)](https://www.rust-lang.org/)
+[![Crossplane](https://img.shields.io/badge/Crossplane-Control%20Plane-0470FF?logo=crossplane&logoColor=white)](https://crossplane.io)
+[![Kubernetes](https://img.shields.io/badge/Kubernetes-EKS%20%2F%20GKE-326CE5?logo=kubernetes&logoColor=white)](https://kubernetes.io)
+[![Kustomize](https://img.shields.io/badge/Kustomize-v5+-1ABC9C?logo=kubernetes&logoColor=white)](https://kustomize.io)
+
+
+**Mission**
+
+**Deliver a 50–70% reduction in engineering time and operational overhead** through a hardened, metadata-driven **Minimum Viable Infrastructure (MVI)**. Grow Without Limits consolidates delivery onto **one EKS/GKE cluster** with **Kustomize-based multi-namespace isolation** across `lornu-ai-dev`, `lornu-ai-staging`, and `lornu-ai-prod` namespaces.
+
+## **Autonomous Workflow Protocol**
+
+When tasked with project maintenance or objective progression, follow this Algorithmic Logic loop:
+
+1. **Poll & Prioritize**:
+   - Use available tools to fetch the latest open GitHub Pull Requests and Issues.
+   - Categorize by impact and urgency.
+
+2. **Analyze & Engage**:
+   - Review each item thoroughly.
+   - Post relevant comments, code reviews, or technical feedback directly to the threads.
+
+3. **Document**:
+   - Update the primary GitHub Issue(s) with a concise summary of progress made and the current status of the objective.
+   - This ensures the "Source of Truth" is always current.
+
+4. **Iterate**:
+   - Identify the next highest-priority action item to maintain momentum.
+   - Propose or initiate the next logical file change or command.
+
+5. **Exception Handling**:
+   - If a task is blocked, requires credentials you lack, or needs human architectural input, **STOP** immediately.
+   - Clearly define the blocker and ask the user for guidance.
+## **Shared Agent State**
+
+Lornu AI utilizes a **Shared State Mechanism** to synchronize context across multiple IDE agents (Windsurf, Cursor, VSCode):
+
+- **File**: `.lornu/STATE.json` (git-ignored)
+- **Purpose**: Tracks active agents, tasks, branch status, and compliance.
+- **Protocol**: Managed by `lornu-mcp-hub`, exposed via `mcp://lornu-ai/state`.
+- **Security**: Local-only, file permissions 600.
+
+## **CI/CD Quality Gates (Grow Without Limits Unified)**
+
+The repository implements a 3-tier validation engine for all infrastructure changes:
+
+1. **Level 1: Syntactic Build Test**: Validates that all Kustomize overlays can be built successfully (`kustomize build`).
+2. **Level 2: Schema Validation**: Uses `kubeconform` to validate Kubernetes resources against official schemas.
+3. **Level 3: Security & Policy Guardrails**: Uses `Checkov` to scan for security misconfigurations and policy violations.
+4. **Secret Scanning**: Uses `Gitleaks` to prevent sensitive data from being committed.
+5. **Label Compliance**: Ensures all resources have mandatory `lornu.ai/environment`, `lornu.ai/managed-by`, and `lornu.ai/asset-id` labels.
+6. **Gemini Code Review**: Automated AI code review for all Pull Requests (Issue #695).
+7. **PR Merge Policy**: NO pull requests may be merged if there are failing CI checks or unresolved merge conflicts.
+8. **Unit Test Coverage**: Coverage is enforced with a phased rollout via `.github/workflows/rust-coverage.yml` (75% threshold: warn on PRs/non-main pushes, block on `main` push).
+
+**Declarative GitOps Policy**: All infrastructure changes must follow the declarative GitOps workflow. Imperative commands are prohibited. See [docs/DECLARATIVE_GITOPS_POLICY.md](docs/DECLARATIVE_GITOPS_POLICY.md).
+
+## **Zero-Trust OIDC Authentication**
+
+Lornu AI implements **universal OIDC federation** for sovereign, zero-secret authentication across all environments:
+
+### **AWS Hub (EKS) - IRSA**
+- **IAM OIDC Provider**: GitHub Actions + EKS service accounts
+- **Roles**: `lornu-ai-github-actions-role`, `lornu-ai-flux-controller-role`
+- **Annotation**: `eks.amazonaws.com/role-arn: arn:aws:iam::${AWS_ACCOUNT_ID}:role/...`
+
+### **GCP Spoke (GKE) - Workload Identity**
+- **Workload Identity Pool**: `github-pool` with GitHub + EKS providers
+- **Service Account**: `lornu-ai-sa@${GCP_PROJECT_ID}.iam.gserviceaccount.com`
+- **Annotation**: `iam.gke.io/gcp-service-account: ...`
+
+### **GitOps Flow**
+1. **GitHub Actions** → OIDC → IAM Roles → Temporary Credentials
+2. **EKS/GKE Pods** → IRSA/Workload Identity → Cloud Resources
+3. **Zero Static Secrets** - All authentication is federated
+
+These gates are enforced on every Pull Request to `develop` and `staging`.
+
+## **Global Low-Cost Data Fabric (GLCDF)**
+
+The **GLCDF** is a unified, globally distributed persistence layer designed for autonomous agents, optimized for extreme cost-efficiency and sovereign data control (Issue #541).
+
+- **Storage Engine**: Azure Cosmos DB (Serverless/Provisioned Multi-region) + Azure Blob Storage.
+- **Architecture**: Decoupled compute/storage with zero-copy ingest and local-first caching.
+- **Cost Optimization**: 50-70% reduction in state storage costs compared to traditional NoSQL.
+- **Latency Sovereignty**: Global distribution ensuring <100ms state retrieval for agents worldwide.
+- **Governance**: Integrated with `warden` for PII/Secret scrubbing and `zen` for governance.
+- **Client Library**: `packages/glcdf-client/` - Python async client with lazy loading and local caching.
+
+### Quick Start (glcdf-client)
+Client libraries available in Rust and TypeScript for agent state management.
+
+- **Build Once, Promote Often**: All container images are built and mirrored to all clouds by Dockworker.ai, ensuring a single cryptographic digest. Production is promoted by SHA.
+- **Target Branch**: All development PRs must target the `develop` branch.
+- `.github/workflows/`: Consolidated intelligent orchestrators (Issue #440)
+- `dockworker.toml`: Sovereign Build Manifest (Issue #439)
+- `crossplane/hub/deploy/overlays/gcp/`: GCP hub control-plane + infra (PRIMARY Operational Hub)
+- `crossplane/hub/deploy/overlays/azure/`: Azure hub control-plane + infra (In Provisioning)
+- **Production**: Updates to `main` are for production stabilization and promotion.
+
+* **Control Plane (Private Hub)**: `private-lornu-ai` (Zero-Secret, SOPS-Encrypted).
+* **Workload Plane (Public Spoke)**: `lornu-ai` (Application Manifests, Open-Source compatible).
+* **Sync Mechanism**: Flux CD bootstrapped to `private-lornu-ai`.
+* **Single EKS/GKE cluster** with `lornu-ai-dev`, `lornu-ai-staging`, and `lornu-ai-prod` namespaces.
+* **Kustomize overlays** per environment (Spoke-managed).
+* **Crossplane** as infrastructure control plane.
+* **Modern runtimes**: Rust (Backend/Core), Bun (Frontend).
+* **Tooling**: Rust (MANDATORY - Rust-or-Bust policy for all backend components), Bun (Frontend), Infrastructure Cleanup (`scripts/aws-cleanup.sh`).
+* **Performance Sovereignty**: Bolt ⚡ persona ensures sub-100ms latency and maximum cost-efficiency.
+* **Unified Organization**: High-value AI/Agentic repositories consolidated from legacy orgs (see [Repository Migration Audit](docs/STEVEI101_REPO_MIGRATION_AUDIT.md)).
+* **Global Low-Cost Data Fabric (GLCDF)**: Multi-region, Azure-optimized persistence layer for sovereign agent state and long-term memory (Issue #541).
+
+## **Key Operational Agents**
+
+Lornu AI includes several autonomous agents for operational excellence:
+
+- **SRE Auto-Remediation Agent** (`ai-agents/sre-agent-rs/`): Rust-based Kubernetes pod failure detection with AI-driven remediation using GPT-4o via Rig framework
+- **Drift Enforcer Agent** (`ai-agents/drift-enforcer/`): Multi-cloud resource sprawl detection and automated decommissioning
+- **Workflow Sentinel** (`ai-agents/workflow-sentinel-rs/`): High-performance GitHub Actions linter implemented in Rust
+- **PR Review Agent** (`ai-agents/ai-agent-pr-review/`): Automated code review with Gemini integration
+- **Cloudflare DNS Agent** (`ai-agents/cloudflare-dns-agent/`): Multi-cloud DNS synchronization across AWS Route53, GCP Cloud DNS, and Azure DNS
+
+For complete agent documentation, see [AGENTS.md](AGENTS.md).
+
+## **Directory Structure**
+
+```plaintext
+crossplane/hub/deploy/          # Unified hub infrastructure (Issue #472)
+  ├── base/                     # Shared infrastructure APIs
+  └── overlays/{aws,azure,gcp}/ # Cloud-specific + app-agents
+crossplane/spoke/apps/          # Spoke workloads (23 apps + 5 hub agents)
+apps/                           # Deployable applications (23 total)
+  ├── automation-hub/           # Cloudflare Workers (OIDC hub + CI automation)
+  ├── lornu-ai/                 # Lornu AI application parent
+  │   ├── frontend/             # React frontend (Bun)
+  │   └── deploy/               # Deployment manifests (Flux/Kustomize)
+  ├── dockworker-ai/            # Dockworker AI application parent
+  │   ├── frontend/             # React frontend (Bun)
+  │   ├── backend/              # Rust backend
+  │   └── worker/               # Rust worker
+  ├── api/                      # Rust backend
+  ├── cloudflare-dns-agent/     # DNS Sync Agent (Rust)
+  ├── cloudflare-edge-discovery/ # Edge Discovery Worker (TypeScript)
+  └── [17 more applications]
+ai-agents/                      # Autonomous Agents (Rust)
+  ├── aiops-agent/              # AIOps Auto-Remediation
+  ├── ai-agent-cleaner/         # Security scanner
+  ├── ai-agent-pr-review/       # CI gatekeeper
+  ├── sre-agent/                # SRE Auto-Remediation
+  └── agent-registry/           # FastA2A Agent Registry Service
+packages/                       # Reusable libraries ONLY
+  ├── glcdf-client/             # Global Low-Cost Data Fabric client (Rust/TS)
+  ├── lornu-mcp-hub/            # MCP tools hub
+  └── ai-agent-cleaner/         # Cleaner library
+templates/                      # Satellite repository templates (7-File Rule, CI/CD)
+terraform/                      # Legacy infrastructure (Terraform Cloud)
 ```
 
-## Architecture
+### **Lornu AI Multi-Cloud Mesh (Active Satellites)**
+| Satellite | Role | Primary Cloud | Status |
+| :--- | :--- | :--- | :--- |
+| **gitlab-container-builds** | Sovereign Agent Builder & CI Templates | GitLab | ✅ Active |
+| **automation-hub** | Centralized Cloudflare Workers | Cloudflare | ✅ Active |
+| **lornu-aks-hub** | Azure Hub Control Plane | Azure | ✅ Active |
 
-### Workspace Structure
+| Satellite | Cloud | Region | Endpoint | Status | Logistcs |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **lornu-aks-hub** | Azure | eastus2 | `api.lornu.ai` | ✅ Active (Hub) | Flux/Crossplane |
+| **<GCP_GKE_CLUSTER_NAME>** | GCP | us-central1 | `<GCP_GKE_LB_IP>` | ✅ Active (GCP) | Flux/GKE |
+| **dockworker-ai** | AWS | us-east-2 | `dockworker.lornu.ai` | ✅ Active | Container packaging platform |
+| **financial-agent-spoke** | GCP | us-central1 | `email.lornu.ai` | ⚠️ Migrating | App+SQL Overlay |
+| **ai-agent-core** | AWS | us-east-2 | `core.lornu.ai` | ✅ Active | Flux/Crossplane |
+| **lornu-crawler** | GCP | us-central1 | `crawler.lornu.ai` | ✅ Active | Playwright/Flux |
+| **YouTube** | N/A | N/A | `youtube.com/@lornu-ai` | ✅ Active | Community Link |
 
-```
-crates/
-├── core/              # Shared types, traits, scheduling policies (Epic 1-7)
-│   ├── lease.rs       # Lease state machine
-│   ├── retry.rs       # Exponential backoff policy
-│   ├── priority.rs    # Task priorities (Critical/High/Normal/Low)
-│   ├── circuit_breaker.rs     # Resilience pattern
-│   ├── task_timeout.rs        # Soft + hard timeouts
-│   ├── queue_backpressure.rs  # Degradation modes (Normal/Moderate/High/Critical)
-│   ├── priority_queue.rs      # Priority-aware task queue
-│   ├── time_slice_scheduler.rs # Weighted round-robin (50/30/15/5)
-│   ├── priority_inversion.rs  # Detection for diagnostics
-│   ├── event_log.rs           # Memory + SQLite event sinks
-│   ├── persistent_lease.rs    # SQLite-backed recovery
-│   └── traits.rs              # Core abstractions (Queue, LeaseStore, EventSink, etc.)
-├── worker/            # Worker runtime (Epic 2 complete + resilience)
-│   ├── worker_runtime.rs      # Main task orchestration
-│   ├── lease_manager.rs       # Lifecycle management
-│   ├── process.rs             # OS process execution (macOS optimized)
-│   ├── cancel_token.rs        # Graceful cancellation
-│   └── fake_worker.rs         # Test double
-├── scheduler/         # StubScheduler for testing
-├── transport/         # Wire protocol (Epic 5)
-│   ├── framing.rs     # Length-prefixed JSON + framing
-│   ├── messages.rs    # CoordinatorRequest/Response types
-│   └── error.rs       # Transport error handling
-├── coordinator/       # Server-side scheduler state (Epic 5)
-│   ├── server.rs      # TCP listener + request dispatch
-│   ├── state.rs       # CoordinatorState (Arc-wrapped traits)
-│   ├── node_registry.rs       # Worker node tracking + health
-│   ├── cache_index.rs         # Distributed cache coordination
-│   └── error.rs
-└── node/              # Client-side worker integration (Epic 5)
-    ├── connection.rs          # SSH/tmux session mgmt + TCP
-    ├── network_queue.rs       # Queue trait over network
-    ├── network_lease_store.rs # LeaseStore trait over network
-    ├── network_event_sink.rs  # EventSink trait over network
-    ├── network_cache.rs       # Cache discovery
-    └── worker_node.rs         # Builder pattern for runtime construction
-```
+## **Satellite Repositories**
 
-### Key Components
+Lornu AI uses a **hub-and-spoke architecture** where application source code lives in separate **satellite repositories**, while this hub repository manages deployment manifests and infrastructure:
 
-**Task Execution**:
-- **WorkerRuntime**: Main async orchestration loop (dequeue → acquire lease → execute → emit events)
-- **LeaseManager**: Prevents duplicate execution, handles expiry/renewal via heartbeat
-- **ProcessHandle**: macOS-optimized subprocess spawning with process groups + graceful shutdown
+### **Active Satellite Repositories**
 
-**Resilience**:
-- **CircuitBreaker**: 3-state pattern (Closed → Open → Half-Open) for fault tolerance
-- **TimeoutPolicy**: Soft timeouts (graceful) + hard timeouts (forced kill) with load-aware multipliers
-- **RetryHandler**: Exponential backoff (100ms → 2.0x → 30s max) with configurable codes
+| Repository | Purpose | Registry | Status |
+|------------|---------|----------|--------|
+| logistics-supervisor-api | Container packaging platform | AWS ECR | ✅ Active |
+| financial-agent-spoke | Intelligent email response | AWS ECR | ✅ Active |
+| [ai-agents-core](https://github.com/lornu-ai/ai-agents-core) | Centralized agent framework | AWS ECR | ✅ Active |
+| [lornu-crawler](https://github.com/lornu-ai/lornu-crawler) | Site crawler & screenshotter | GCP Artifact Registry | ✅ Active |
+| [cloudflare-dns-agent](apps/cloudflare-dns-agent/README.md) | Multi-Cloud DNS Sync Agent | ECR/GAR/ACR | ✅ Active |
+| [cloudflare-edge-discovery](apps/cloudflare-edge-discovery/README.md) | Edge Discovery Worker (Hyperdrive) | Cloudflare Workers | ✅ Active |
+| [lornu.ai](https://github.com/lornu-ai/lornu.ai) | Hub repository (Crossplane/Flux) | AWS ECR | ✅ Active |
+| [agentnav](https://github.com/lornu-ai/agentnav) | Agentic Navigation module | N/A | ✅ Active |
+| [product-mindset](https://github.com/lornu-ai/product-mindset) | Product Mindset analytics | N/A | ✅ Active |
+| [cursor-agent-rules](https://github.com/lornu-ai/cursor-agent-rules) | Automated AI-Code Review | N/A | ✅ Active |
+| [autonomous-sre-agent](https://github.com/lornu-ai/autonomous-sre-agent) | Sovereign SRE drift detection + auto-remediation | N/A | ✅ Active |
+| [gcp-conversation-service](https://github.com/lornu-ai/gcp-conversation-service) | Gemini Integration hub | GCP Cloud Run | ✅ Active |
+| [email-triage](https://github.com/lornu-ai/email-triage) | Automated email triage | N/A | ✅ Active |
+| [antigravity-ide-tracker](https://github.com/lornu-ai/antigravity-ide-tracker) | IDE/Dev workflow tracking | N/A | ✅ Active |
+| [not-sure](https://github.com/lornu-ai/not-sure) | Migration of stevei101/not-sure | N/A | ✅ Active |
 
-**Scheduling (Epic 5, Phase 1)**:
-- **PriorityQueueManager**: 4-queue system respects degradation modes
-- **TimeSliceScheduler**: Deterministic round-robin (50% Critical, 30% High, 15% Normal, 5% Low)
-- **QueueBackpressureManager**: Adaptive degradation (Normal → Moderate → High → Critical)
-- **PriorityInversionDetector**: Tracks lock contention for diagnostics
+### **Setting Up New Satellites**
 
-**Distribution**:
-- **CoordinatorServer**: Multi-client TCP server managing global state, task distribution, lease recovery
-- **NodeRegistry**: Worker tracking with stale detection (60s timeout) + automatic recovery
-- **FramedTransport**: Length-prefixed JSON wire protocol (16 MiB max, robust EOF handling)
-- **NetworkQueue/NetworkLeaseStore/NetworkEventSink**: Trait implementations over TCP
+All container builds and multi-cloud pushes are now handled by Dockworker.ai, ensuring a single cryptographic digest across AWS, GCP, and Azure. See `dockworker.toml` for configuration and `.github/workflows/dockworker-sync.yml` for the workflow.
 
-**Remote Execution**:
-- **aivcs-session CLI** (planned): SSH/tmux session manager for `aivcs.local` (Apple Silicon studio)
-  - Sanitizes repo names, generates deterministic session IDs
-  - Manages tmux session lifecycle (attach-or-create)
-  - Scheduler shells out to `aivcs-session attach --repo X --work Y --role Z`
+**Org policy — never `Dockerfile`:** lornu-ai and stevedores-org build images with **Nix OCI** (`flake.nix`) + **dockworker.ai**, not hand-written Dockerfiles. Do not add or restore `Dockerfile` / `docker build`; see the 6-file instruction set (`.cursorrules`, `AGENTS.md`, etc.) for agents.
 
-## Testing
+### **Automation & Infrastructure Satellites**
 
-- **36+ tests** passing with zero warnings
-- **Unit tests**: Leases, retries, cancellation
-- **Component tests**: Log streaming, process spawning
-- **Integration tests**: Real subprocess execution
-- **Pre-commit hooks**: Auto-format and lint
+**Cloudflare Workers** are managed in the **automation-hub** repository:
+- **Repository**: [lornu-ai/automation-hub](https://github.com/lornu-ai/automation-hub)
+- **Workers**: `automation-hub` (CI automation), `lornu-edge-discovery` (agent discovery via Hyperdrive)
+- **Private RAG (Issue #565)**: R2 bucket + Vectorize for agent knowledge grounding
+  - Endpoints: `/api/rag/search`, `/api/vectorize/trigger`, `/api/vectorize/status`
+  - R2 Bucket: `lornu-private-rag-prod`
+  - Vectorize Index: `lornu-private-knowledge` (768 dims, bge-base-en-v1.5)
+- **Deployment**: Uses Wrangler CLI (`wrangler deploy`)
+- **Related Issues**: #589 (Edge Discovery), #542 (CI Automation), #565 (Private RAG)
 
-## Code Quality
+**GitLab CI/CD** configurations are managed in the **gitlab-container-builds** repository:
+- **Repository**: [lornu-ai/gitlab-container-builds](https://github.com/lornu-ai/gitlab-container-builds)
+- **Purpose**: GitLab CI/CD pipelines for container builds and multi-cloud mirroring
+- **Related**: GitLab pull mirroring setup (see `docs/GITLAB_MIRROR_SETUP.md`)
 
-- Zero unsafe code (except required for process groups)
-- All warnings denied: `RUSTFLAGS="-D warnings"`
-- Clippy strict mode: `cargo clippy -- -D warnings`
+## **Development Standards**
 
-## Documentation
+### **The 7-File Rule (Documentation as Infrastructure)**
 
-- **[IMPLEMENTATION.md](IMPLEMENTATION.md)**: Detailed architecture & design decisions
-- Inline documentation for all public APIs
-- Test examples in `crates/worker/tests/`
+Treating documentation as infrastructure ensures all AI assistants (Cursor, Windsurf, Copilot) operate with synchronized context, preventing schema drift and maintaining the **Sovereign Knowledge Fabric.**
 
-## Remote Execution Strategy (Issue #37)
+**Mandatory Context Files:**
+1. **`.cursorrules`**: Local IDE rules.
+2. **`AGENTS.md`**: A2A Protocol and Agent capabilities.
+3. **`CLAUDE.md`**: Build/test commands and project context.
+4. **`README.md`**: High-level project map.
+5. **`ARCH_PRESERVE.md`**: Architectural preservation rules.
+6. **`.github/copilot-instructions.md`**: GitHub Copilot context.
+7. **`.github/system-instruction.md`**: Global "Sovereign Intelligence" standards.
 
-The scheduler can execute tasks on remote Apple Silicon machines (`aivcs.local`) using SSH + tmux:
+**When to update:**
+- New features added to `apps/` or `app-agents/`
+- Changes to deployment patterns, build commands, or infrastructure
+- New standards, conventions, or governance policies
 
-### Session Management Contract
-```bash
-aivcs-session attach \
-  --repo knittingCrab \
-  --work task-12345 \
-  --role runner
-```
+### **Agent Workflow (Autonomous Operation Loop)**
 
-**Guarantees**:
-- Deterministic session naming: `aivcs__knittingcrab__task-12345__runner`
-- Idempotent: Same inputs → attach to existing session
-- Safe: Sanitizes inputs, forbids `..` and `/` in repo names
-- Correct directory: Auto-starts in `~/engineering/code/clone-base/$REPO_NAME`
+When working autonomously, agents follow this algorithmic loop:
 
-**Roles**:
-- `agent`: Long-lived (keep for debugging)
-- `runner`: Disposable (auto-kill on completion)
-- `human`: Manual interactive sessions
+1. **Poll & Prioritize**: Fetch the latest open GitHub Pull Requests and Issues.
+2. **Analyze & Engage**: Review each item and post relevant comments or actionable feedback.
+3. **Document**: Update the primary GitHub Issue(s) with a concise summary of progress made and current status.
+4. **Iterate**: Identify the next highest-priority action item to maintain momentum.
+5. **Exception Handling**: If a task is blocked or requires human input, stop and ask for guidance immediately.
 
-See [ARCHITECTURE.md](ARCHITECTURE.md) for implementation details.
+### **Pull Request Requirements**
 
-## Roadmap
+* **Labeling**: Apply a label for the **worker/agent** (e.g., `codex`, `claude`, `antigravity`, `vs-code`, `jules`, `gemini-cli`).
+  - Create label if needed: `gh label create <agent-name>`
+  - Apply to PR: `gh pr edit <pr-number> --add-label <agent-name>`
+* **Base Branch**: All PRs must target the `develop` branch.
+* **Documentation Sync**: Every PR must include updates to the **7-File Rule** if architectural changes are made.
+* **Terraform Hygiene**: Run `terraform fmt` and `terraform validate` before pushing changes.
 
-**Immediate** (Phase 2):
-- Epic 1: Scheduler Core (DAG validation, priority + fairness, resource allocation)
-  - Critical path: DAG cycle detection unblocks all other work
-- Epic 6: Observability + UX (status CLI, event timelines, causal reasoning)
-- Epic 7: Soak testing + metrics validation
+## **Infrastructure & Deployment**
 
-## Production Evaluations & Bullpen Migration
+### **GitOps Architecture (Flux + ArgoCD + Crossplane + ESO)**
 
-knittingCrab supports rigorous agent evaluations for the Lornu AI bullpen:
+Grow Without Limits uses a **declarative GitOps model** with clear separation of concerns:
 
-- **Evaluation Metadata**: Tasks can carry AIVCS run IDs and success rubrics to track promotion cycles.
-- **Roster Gatekeeper**: Enforces node isolation policy. Phase 1/2 (nursery) agents are restricted to development nodes, while Phase 3/4 agents and explicit **Promotion Gates** are permitted on production hardware.
-- **AIVCS Integration**: Every task event can be recorded in the content-addressed sovereign ledger for auditability.
+- **Flux CD**: Primary GitOps engine for cluster bootstrapping and application delivery.
+- **ArgoCD**: Visual orchestrator for multi-cluster workload management.
+- **Crossplane**: Control plane for managing cloud resources (AWS, GCP, Azure) as Kubernetes objects.
+- **External Secrets Operator (ESO)**: Secure secret injection from AWS Secrets Manager/Azure Key Vault.
 
-See `examples/promotion-gate-task.yaml` for an example evaluation task.
+For detailed policy, see [docs/DECLARATIVE_GITOPS_POLICY.md](docs/DECLARATIVE_GITOPS_POLICY.md).
 
+## **Official Contact Information**
 
-## License
-
-See [LICENSE](LICENSE) file.
+- **Contact**: `contact@lornu.ai` - Official email for all external communications
+- **Policy**: Only publish `contact@lornu.ai` in documentation and UI. Never publish personal or alternative email addresses.
