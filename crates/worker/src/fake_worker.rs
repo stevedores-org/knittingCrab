@@ -108,7 +108,9 @@ impl Queue for FakeWorker {
         Ok(())
     }
 
-    async fn discard(&self, _task_id: TaskId) -> Result<(), CoreError> {
+    async fn discard(&self, task_id: TaskId) -> Result<(), CoreError> {
+        let mut q = self.queue.lock().unwrap();
+        q.retain(|task| task.task_id != task_id);
         Ok(())
     }
 }

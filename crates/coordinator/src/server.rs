@@ -224,10 +224,12 @@ impl CoordinatorServer {
             // Evict unhealthy nodes (active probe failures)
             let unhealthy = state.node_registry.unhealthy_nodes();
             for worker_id in unhealthy {
-                // Requeue active leases for this node
+                // Requeue active leases for this node only (mirror stale-node path).
                 if let Ok(leases) = state.active_leases().await {
                     for lease in leases {
-                        let _ = state.queue.requeue(lease.task_id, lease.attempt + 1).await;
+                        if lease.worker_id == worker_id {
+                            let _ = state.queue.requeue(lease.task_id, lease.attempt + 1).await;
+                        }
                     }
                 }
                 state.node_registry.remove(&worker_id);
@@ -318,5 +320,34 @@ mod tests {
         };
         let resp = CoordinatorServer::handle_request(&state, req3, &mut None).await;
         assert!(matches!(resp, CoordinatorResponse::CacheLocations(ref locs) if locs.len() == 1));
+    }
+
+    #[test]
+    fn unhealthy_reaper_filters_leases_by_worker_id() {
+        let unhealthy = WorkerId::new();
+        let healthy = WorkerId::new();
+        let leases = vec![
+            Lease::new(
+                knitting_crab_core::ids::TaskId::new(),
+                unhealthy,
+                Duration::from_secs(30),
+                0,
+            ),
+            Lease::new(
+                knitting_crab_core::ids::TaskId::new(),
+                healthy,
+                Duration::from_secs(30),
+                0,
+            ),
+        ];
+
+        let requeued: Vec<_> = leases
+            .iter()
+            .filter(|lease| lease.worker_id == unhealthy)
+            .map(|lease| lease.task_id)
+            .collect();
+
+        assert_eq!(requeued.len(), 1);
+        assert_eq!(requeued[0], leases[0].task_id);
     }
 }

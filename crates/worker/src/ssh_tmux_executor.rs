@@ -27,9 +27,26 @@ impl SshTmuxSessionExecutor {
         Self { session_manager }
     }
 
-    /// Generate a deterministic session name for a task.
-    fn session_name_for_task(task_id: TaskId) -> String {
-        format!("kc_{}", task_id.to_string().replace("-", "_"))
+    /// Escape a string for use inside double quotes in a `sh -c "…"` script.
+    fn shell_escape_sh_double(s: &str) -> String {
+        s.replace('\\', "\\\\")
+            .replace('"', "\\\"")
+            .replace('$', "\\$")
+            .replace('`', "\\`")
+    }
+
+    /// Join argv into a shell-safe command string (preserves argument boundaries).
+    fn shell_join(args: &[String]) -> String {
+        args.iter()
+            .map(|arg| format!("\"{}\"", Self::shell_escape_sh_double(arg)))
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
+    /// Build `sh -c` wrapper that runs argv and writes exit code to the sentinel file.
+    fn build_wrapped_command(args: &[String], sentinel_path: &str) -> String {
+        let inner = format!("({}); echo $? > {sentinel_path}", Self::shell_join(args));
+        format!("sh -c \"{}\"", Self::shell_escape_sh_double(&inner))
     }
 
     /// Generate sentinel file path for exit code polling.
@@ -48,9 +65,12 @@ impl ProcessExecutor for SshTmuxSessionExecutor {
         mut cancel_guard: CancelGuard,
     ) -> Result<ExitOutcome, WorkerError> {
         let task_id = params.task_id;
-        let session_name = Self::session_name_for_task(task_id);
         let sentinel_path = Self::sentinel_path_for_task(task_id);
         let window_name = "main";
+
+        if params.command.is_empty() {
+            return Err(WorkerError::SpawnFailed("empty command".into()));
+        }
 
         // Ensure session exists
         let config = match &params.location {
@@ -71,16 +91,16 @@ impl ProcessExecutor for SshTmuxSessionExecutor {
             }
         };
 
-        self.session_manager
+        let session_name = self
+            .session_manager
             .ensure_session(&config)
             .await
             .map_err(|e| WorkerError::Internal(format!("ensure_session failed: {}", e)))?;
 
-        debug!("Created session: {}", session_name);
+        debug!("Using session: {}", session_name);
 
         // Build command with sentinel file wrapper
-        let command_str = params.command.join(" ");
-        let wrapped_command = format!("sh -c '({}); echo $? > {}'", command_str, sentinel_path);
+        let wrapped_command = Self::build_wrapped_command(&params.command, &sentinel_path);
 
         // Run command in session
         self.session_manager
@@ -150,6 +170,90 @@ impl SshTmuxSessionExecutor {
 mod tests {
     use super::*;
     use crate::fake_session_manager::{ExitCodeBehavior, FakeRemoteSessionManager};
+
+    #[tokio::test]
+    async fn success_path_uses_session_from_ensure_session() {
+        let fake_manager = Arc::new(FakeRemoteSessionManager::new());
+        let executor = SshTmuxSessionExecutor::new(fake_manager.clone());
+
+        let params = SpawnParams {
+            task_id: TaskId::new(),
+            command: vec!["echo".to_string(), "hello".to_string()],
+            working_dir: std::path::PathBuf::from("/tmp"),
+            env: Default::default(),
+            location: knitting_crab_core::ExecutionLocation::default(),
+        };
+
+        let sink = Arc::new(crate::fake_worker::FakeWorker::new()) as Arc<dyn EventSink>;
+        let (_token, guard) = crate::CancelToken::new();
+
+        let _ = executor.execute(params, sink, guard).await.unwrap();
+
+        let calls = fake_manager.drain_calls();
+        let ensure = calls
+            .iter()
+            .find(|c| c.method == "ensure_session")
+            .expect("ensure_session called");
+        let run = calls
+            .iter()
+            .find(|c| c.method == "run_command_in_session")
+            .expect("run_command_in_session called");
+        assert_eq!(run.session_name, ensure.session_name);
+    }
+
+    #[test]
+    fn shell_join_preserves_argument_boundaries() {
+        let joined = SshTmuxSessionExecutor::shell_join(&[
+            "echo".to_string(),
+            "hello world".to_string(),
+            "it's".to_string(),
+        ]);
+        assert_eq!(joined, "\"echo\" \"hello world\" \"it's\"");
+    }
+
+    #[test]
+    fn build_wrapped_command_is_valid_sh_syntax() {
+        let sentinel = "/tmp/kc_exit_abc123";
+        let wrapped = SshTmuxSessionExecutor::build_wrapped_command(
+            &[
+                "echo".to_string(),
+                "hello world".to_string(),
+                "it's".to_string(),
+            ],
+            sentinel,
+        );
+        assert!(wrapped.starts_with("sh -c \""));
+        assert!(wrapped.contains("hello world"));
+        assert!(wrapped.ends_with(&format!("> {sentinel}\"")));
+
+        let status = std::process::Command::new("sh")
+            .arg("-n")
+            .arg("-c")
+            .arg(&wrapped)
+            .status()
+            .expect("sh -n");
+        assert!(status.success(), "wrapped command must be valid sh syntax");
+    }
+
+    #[tokio::test]
+    async fn empty_command_is_rejected() {
+        let fake_manager = Arc::new(FakeRemoteSessionManager::new());
+        let executor = SshTmuxSessionExecutor::new(fake_manager);
+
+        let params = SpawnParams {
+            task_id: TaskId::new(),
+            command: vec![],
+            working_dir: std::path::PathBuf::from("/tmp"),
+            env: Default::default(),
+            location: knitting_crab_core::ExecutionLocation::default(),
+        };
+
+        let sink = Arc::new(crate::fake_worker::FakeWorker::new()) as Arc<dyn EventSink>;
+        let (_token, guard) = crate::CancelToken::new();
+
+        let err = executor.execute(params, sink, guard).await.unwrap_err();
+        assert!(matches!(err, WorkerError::SpawnFailed(_)));
+    }
 
     #[tokio::test]
     async fn success_path_returns_exit_outcome_success() {
