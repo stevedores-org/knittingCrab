@@ -120,7 +120,11 @@ pub async fn spawn(
     let span = tracing::info_span!("process_spawn", task_id = %params.task_id);
     let _enter = span.enter();
 
-    let mut cmd = std::process::Command::new(&params.command[0]);
+    let program = params.command.first().ok_or_else(|| {
+        WorkerError::SpawnFailed("empty command".into())
+    })?;
+
+    let mut cmd = std::process::Command::new(program);
 
     if params.command.len() > 1 {
         cmd.args(&params.command[1..]);
@@ -148,7 +152,7 @@ pub async fn spawn(
     let mut tokio_cmd = tokio::process::Command::from(cmd);
 
     let mut child = tokio_cmd.spawn().map_err(|e| {
-        WorkerError::SpawnFailed(format!("failed to spawn {}: {}", params.command[0], e))
+        WorkerError::SpawnFailed(format!("failed to spawn {}: {}", program, e))
     })?;
 
     let task_id = params.task_id;
@@ -514,6 +518,23 @@ mod tests {
             logs
         );
         assert!(stderr_logs.iter().any(|l| l.content.contains("stderr_msg")));
+    }
+
+    #[tokio::test]
+    async fn test_spawn_empty_command_rejected() {
+        let sink = Arc::new(TestSink {
+            logs: Mutex::new(Vec::new()),
+        });
+        let params = SpawnParams {
+            task_id: TaskId::new(),
+            command: vec![],
+            working_dir: PathBuf::from("/tmp"),
+            env: Default::default(),
+            location: ExecutionLocation::default(),
+        };
+
+        let result = spawn(params, sink).await;
+        assert!(matches!(result, Err(WorkerError::SpawnFailed(_))));
     }
 
     #[tokio::test]

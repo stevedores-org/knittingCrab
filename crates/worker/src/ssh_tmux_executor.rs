@@ -27,9 +27,17 @@ impl SshTmuxSessionExecutor {
         Self { session_manager }
     }
 
-    /// Generate a deterministic session name for a task.
-    fn session_name_for_task(task_id: TaskId) -> String {
-        format!("kc_{}", task_id.to_string().replace("-", "_"))
+    /// Shell-escape a single argv element for use inside `sh -c '…'`.
+    fn shell_escape_arg(arg: &str) -> String {
+        format!("'{}'", arg.replace('\'', "'\"'\"'"))
+    }
+
+    /// Join argv into a shell-safe command string (preserves argument boundaries).
+    fn shell_join(args: &[String]) -> String {
+        args.iter()
+            .map(|arg| Self::shell_escape_arg(arg))
+            .collect::<Vec<_>>()
+            .join(" ")
     }
 
     /// Generate sentinel file path for exit code polling.
@@ -48,9 +56,12 @@ impl ProcessExecutor for SshTmuxSessionExecutor {
         mut cancel_guard: CancelGuard,
     ) -> Result<ExitOutcome, WorkerError> {
         let task_id = params.task_id;
-        let session_name = Self::session_name_for_task(task_id);
         let sentinel_path = Self::sentinel_path_for_task(task_id);
         let window_name = "main";
+
+        if params.command.is_empty() {
+            return Err(WorkerError::SpawnFailed("empty command".into()));
+        }
 
         // Ensure session exists
         let config = match &params.location {
@@ -71,15 +82,16 @@ impl ProcessExecutor for SshTmuxSessionExecutor {
             }
         };
 
-        self.session_manager
+        let session_name = self
+            .session_manager
             .ensure_session(&config)
             .await
             .map_err(|e| WorkerError::Internal(format!("ensure_session failed: {}", e)))?;
 
-        debug!("Created session: {}", session_name);
+        debug!("Using session: {}", session_name);
 
         // Build command with sentinel file wrapper
-        let command_str = params.command.join(" ");
+        let command_str = Self::shell_join(&params.command);
         let wrapped_command = format!("sh -c '({}); echo $? > {}'", command_str, sentinel_path);
 
         // Run command in session
@@ -150,6 +162,66 @@ impl SshTmuxSessionExecutor {
 mod tests {
     use super::*;
     use crate::fake_session_manager::{ExitCodeBehavior, FakeRemoteSessionManager};
+
+    #[tokio::test]
+    async fn success_path_uses_session_from_ensure_session() {
+        let fake_manager = Arc::new(FakeRemoteSessionManager::new());
+        let executor = SshTmuxSessionExecutor::new(fake_manager.clone());
+
+        let params = SpawnParams {
+            task_id: TaskId::new(),
+            command: vec!["echo".to_string(), "hello".to_string()],
+            working_dir: std::path::PathBuf::from("/tmp"),
+            env: Default::default(),
+            location: knitting_crab_core::ExecutionLocation::default(),
+        };
+
+        let sink = Arc::new(crate::fake_worker::FakeWorker::new()) as Arc<dyn EventSink>;
+        let (_token, guard) = crate::CancelToken::new();
+
+        let _ = executor.execute(params, sink, guard).await.unwrap();
+
+        let calls = fake_manager.drain_calls();
+        let ensure = calls
+            .iter()
+            .find(|c| c.method == "ensure_session")
+            .expect("ensure_session called");
+        let run = calls
+            .iter()
+            .find(|c| c.method == "run_command_in_session")
+            .expect("run_command_in_session called");
+        assert_eq!(run.session_name, ensure.session_name);
+    }
+
+    #[test]
+    fn shell_join_preserves_argument_boundaries() {
+        let joined = SshTmuxSessionExecutor::shell_join(&[
+            "echo".to_string(),
+            "hello world".to_string(),
+            "it's".to_string(),
+        ]);
+        assert_eq!(joined, "'echo' 'hello world' 'it'\"'\"'s'");
+    }
+
+    #[tokio::test]
+    async fn empty_command_is_rejected() {
+        let fake_manager = Arc::new(FakeRemoteSessionManager::new());
+        let executor = SshTmuxSessionExecutor::new(fake_manager);
+
+        let params = SpawnParams {
+            task_id: TaskId::new(),
+            command: vec![],
+            working_dir: std::path::PathBuf::from("/tmp"),
+            env: Default::default(),
+            location: knitting_crab_core::ExecutionLocation::default(),
+        };
+
+        let sink = Arc::new(crate::fake_worker::FakeWorker::new()) as Arc<dyn EventSink>;
+        let (_token, guard) = crate::CancelToken::new();
+
+        let err = executor.execute(params, sink, guard).await.unwrap_err();
+        assert!(matches!(err, WorkerError::SpawnFailed(_)));
+    }
 
     #[tokio::test]
     async fn success_path_returns_exit_outcome_success() {

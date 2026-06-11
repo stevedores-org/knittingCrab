@@ -257,6 +257,7 @@ impl<
         let heartbeat_task_id = task.task_id;
         let heartbeat_interval = self.heartbeat_interval_ms;
         let lease_store = self.lease_store.clone();
+        let lease_ttl = self.lease_ttl;
 
         let heartbeat_handle = tokio::spawn(async move {
             let mut ticker = interval(Duration::from_millis(heartbeat_interval));
@@ -265,9 +266,7 @@ impl<
                 if let Ok(None) = lease_store.get(heartbeat_task_id).await {
                     break;
                 }
-                let _ = lease_manager
-                    .renew(heartbeat_task_id, Duration::from_secs(30))
-                    .await;
+                let _ = lease_manager.renew(heartbeat_task_id, lease_ttl).await;
             }
         });
 
@@ -390,13 +389,16 @@ impl<
             token.cancel();
         }
 
-        if self.lease_store.get(task_id).await?.is_some() {
+        let had_lease = self.lease_store.get(task_id).await?.is_some();
+        if had_lease {
             self.lease_manager.cancel(task_id).await?;
-            self.event_sink
-                .emit_event(TaskEvent::Cancelled { task_id })
-                .await?;
-            self.queue.discard(task_id).await?;
         }
+
+        // Queued-but-not-yet-leased tasks must still be removed from the queue.
+        self.queue.discard(task_id).await?;
+        self.event_sink
+            .emit_event(TaskEvent::Cancelled { task_id })
+            .await?;
 
         Ok(())
     }
@@ -586,7 +588,7 @@ mod tests {
             queue.clone(),
             lease_store,
             resource_monitor,
-            event_sink,
+            event_sink.clone(),
             process_executor,
         );
 
@@ -610,6 +612,15 @@ mod tests {
         queue.enqueue(task.clone());
         let cancel_result = runtime.cancel_task(task_id).await;
         assert!(cancel_result.is_ok(), "cancel should succeed");
+        let remaining = queue.dequeue(worker_id).await.unwrap();
+        assert!(remaining.is_none(), "queued task should be discarded on cancel");
+        let events = event_sink.drain_events();
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, TaskEvent::Cancelled { .. })),
+            "cancel should emit Cancelled event"
+        );
     }
 
     #[test]
