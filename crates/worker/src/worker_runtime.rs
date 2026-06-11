@@ -613,7 +613,10 @@ mod tests {
         let cancel_result = runtime.cancel_task(task_id).await;
         assert!(cancel_result.is_ok(), "cancel should succeed");
         let remaining = queue.dequeue(worker_id).await.unwrap();
-        assert!(remaining.is_none(), "queued task should be discarded on cancel");
+        assert!(
+            remaining.is_none(),
+            "queued task should be discarded on cancel"
+        );
         let events = event_sink.drain_events();
         assert!(
             events

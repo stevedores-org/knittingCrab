@@ -327,8 +327,18 @@ mod tests {
         let unhealthy = WorkerId::new();
         let healthy = WorkerId::new();
         let leases = vec![
-            Lease::new(knitting_crab_core::ids::TaskId::new(), unhealthy, Duration::from_secs(30), 0),
-            Lease::new(knitting_crab_core::ids::TaskId::new(), healthy, Duration::from_secs(30), 0),
+            Lease::new(
+                knitting_crab_core::ids::TaskId::new(),
+                unhealthy,
+                Duration::from_secs(30),
+                0,
+            ),
+            Lease::new(
+                knitting_crab_core::ids::TaskId::new(),
+                healthy,
+                Duration::from_secs(30),
+                0,
+            ),
         ];
 
         let requeued: Vec<_> = leases

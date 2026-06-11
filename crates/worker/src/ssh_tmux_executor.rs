@@ -27,17 +27,26 @@ impl SshTmuxSessionExecutor {
         Self { session_manager }
     }
 
-    /// Shell-escape a single argv element for use inside `sh -c '…'`.
-    fn shell_escape_arg(arg: &str) -> String {
-        format!("'{}'", arg.replace('\'', "'\"'\"'"))
+    /// Escape a string for use inside double quotes in a `sh -c "…"` script.
+    fn shell_escape_sh_double(s: &str) -> String {
+        s.replace('\\', "\\\\")
+            .replace('"', "\\\"")
+            .replace('$', "\\$")
+            .replace('`', "\\`")
     }
 
     /// Join argv into a shell-safe command string (preserves argument boundaries).
     fn shell_join(args: &[String]) -> String {
         args.iter()
-            .map(|arg| Self::shell_escape_arg(arg))
+            .map(|arg| format!("\"{}\"", Self::shell_escape_sh_double(arg)))
             .collect::<Vec<_>>()
             .join(" ")
+    }
+
+    /// Build `sh -c` wrapper that runs argv and writes exit code to the sentinel file.
+    fn build_wrapped_command(args: &[String], sentinel_path: &str) -> String {
+        let inner = format!("({}); echo $? > {sentinel_path}", Self::shell_join(args));
+        format!("sh -c \"{}\"", Self::shell_escape_sh_double(&inner))
     }
 
     /// Generate sentinel file path for exit code polling.
@@ -91,8 +100,7 @@ impl ProcessExecutor for SshTmuxSessionExecutor {
         debug!("Using session: {}", session_name);
 
         // Build command with sentinel file wrapper
-        let command_str = Self::shell_join(&params.command);
-        let wrapped_command = format!("sh -c '({}); echo $? > {}'", command_str, sentinel_path);
+        let wrapped_command = Self::build_wrapped_command(&params.command, &sentinel_path);
 
         // Run command in session
         self.session_manager
@@ -200,7 +208,31 @@ mod tests {
             "hello world".to_string(),
             "it's".to_string(),
         ]);
-        assert_eq!(joined, "'echo' 'hello world' 'it'\"'\"'s'");
+        assert_eq!(joined, "\"echo\" \"hello world\" \"it's\"");
+    }
+
+    #[test]
+    fn build_wrapped_command_is_valid_sh_syntax() {
+        let sentinel = "/tmp/kc_exit_abc123";
+        let wrapped = SshTmuxSessionExecutor::build_wrapped_command(
+            &[
+                "echo".to_string(),
+                "hello world".to_string(),
+                "it's".to_string(),
+            ],
+            sentinel,
+        );
+        assert!(wrapped.starts_with("sh -c \""));
+        assert!(wrapped.contains("hello world"));
+        assert!(wrapped.ends_with(&format!("> {sentinel}\"")));
+
+        let status = std::process::Command::new("sh")
+            .arg("-n")
+            .arg("-c")
+            .arg(&wrapped)
+            .status()
+            .expect("sh -n");
+        assert!(status.success(), "wrapped command must be valid sh syntax");
     }
 
     #[tokio::test]

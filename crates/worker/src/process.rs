@@ -120,9 +120,10 @@ pub async fn spawn(
     let span = tracing::info_span!("process_spawn", task_id = %params.task_id);
     let _enter = span.enter();
 
-    let program = params.command.first().ok_or_else(|| {
-        WorkerError::SpawnFailed("empty command".into())
-    })?;
+    let program = params
+        .command
+        .first()
+        .ok_or_else(|| WorkerError::SpawnFailed("empty command".into()))?;
 
     let mut cmd = std::process::Command::new(program);
 
@@ -151,9 +152,9 @@ pub async fn spawn(
     // Convert to tokio::process::Command
     let mut tokio_cmd = tokio::process::Command::from(cmd);
 
-    let mut child = tokio_cmd.spawn().map_err(|e| {
-        WorkerError::SpawnFailed(format!("failed to spawn {}: {}", program, e))
-    })?;
+    let mut child = tokio_cmd
+        .spawn()
+        .map_err(|e| WorkerError::SpawnFailed(format!("failed to spawn {}: {}", program, e)))?;
 
     let task_id = params.task_id;
     let sink_clone = Arc::clone(&sink);
